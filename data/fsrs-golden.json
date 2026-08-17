@@ -1,0 +1,350 @@
+{
+ "start_iso": "2026-01-01T00:00:00+00:00",
+ "cases": [
+  {
+   "seq": 0,
+   "steps": [
+    {
+     "rating": 3,
+     "gap_days": 0,
+     "stability": 2.3065,
+     "difficulty": 2.118103970459016,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 1,
+     "stability": 7.31530074407728,
+     "difficulty": 2.111214235785395,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 604800000
+    },
+    {
+     "rating": 3,
+     "gap_days": 3,
+     "stability": 19.833473465759585,
+     "difficulty": 2.1043313908464483,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 1728000000
+    },
+    {
+     "rating": 3,
+     "gap_days": 10,
+     "stability": 53.9845924297574,
+     "difficulty": 2.0974554287524403,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 4665600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 30,
+     "stability": 139.18255664935018,
+     "difficulty": 2.0905863426205262,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 12009600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 90,
+     "stability": 350.91718389523635,
+     "difficulty": 2.083724125574744,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 30326400000
+    }
+   ]
+  },
+  {
+   "seq": 1,
+   "steps": [
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.212,
+     "difficulty": 6.4133,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 3,
+     "gap_days": 0,
+     "stability": 0.24668918777567272,
+     "difficulty": 6.402115069296838,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 2,
+     "stability": 2.634392411534852,
+     "difficulty": 6.3909413235243795,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 259200000
+    },
+    {
+     "rating": 1,
+     "gap_days": 7,
+     "stability": 0.7186781049486448,
+     "difficulty": 8.798955323938301,
+     "state": "relearning",
+     "step": 0,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 1,
+     "stability": 1.8484968207277466,
+     "difficulty": 8.785384737911201,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 172800000
+    },
+    {
+     "rating": 4,
+     "gap_days": 20,
+     "stability": 14.664557332508911,
+     "difficulty": 8.364745287689175,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 1296000000
+    }
+   ]
+  },
+  {
+   "seq": 2,
+   "steps": [
+    {
+     "rating": 4,
+     "gap_days": 0,
+     "stability": 8.2956,
+     "difficulty": 1.0,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 691200000
+    },
+    {
+     "rating": 4,
+     "gap_days": 5,
+     "stability": 48.44676834337701,
+     "difficulty": 1.0,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 4147200000
+    },
+    {
+     "rating": 4,
+     "gap_days": 25,
+     "stability": 202.69105920345092,
+     "difficulty": 1.0,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 17539200000
+    },
+    {
+     "rating": 4,
+     "gap_days": 120,
+     "stability": 770.5883312265469,
+     "difficulty": 1.0,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 66614400000
+    }
+   ]
+  },
+  {
+   "seq": 3,
+   "steps": [
+    {
+     "rating": 2,
+     "gap_days": 0,
+     "stability": 1.2931,
+     "difficulty": 5.112170705601056,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 330000
+    },
+    {
+     "rating": 2,
+     "gap_days": 0,
+     "stability": 1.2931,
+     "difficulty": 6.7404595108297,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 330000
+    },
+    {
+     "rating": 3,
+     "gap_days": 1,
+     "stability": 3.6464264926373433,
+     "difficulty": 6.728947420615708,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 1,
+     "gap_days": 4,
+     "stability": 0.7825766995831468,
+     "difficulty": 8.91005562961076,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 2,
+     "gap_days": 0,
+     "stability": 0.7825766995831468,
+     "difficulty": 9.2616725048248,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 330000
+    },
+    {
+     "rating": 3,
+     "gap_days": 6,
+     "stability": 3.0950319092020067,
+     "difficulty": 9.247639201616812,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 4,
+     "gap_days": 15,
+     "stability": 14.426379937258325,
+     "difficulty": 8.981463652107191,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 1209600000
+    }
+   ]
+  },
+  {
+   "seq": 4,
+   "steps": [
+    {
+     "rating": 3,
+     "gap_days": 0,
+     "stability": 2.3065,
+     "difficulty": 2.118103970459016,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 1,
+     "gap_days": 1,
+     "stability": 0.5712991793450282,
+     "difficulty": 7.394502741279718,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.210445486753504,
+     "difficulty": 9.128819137736839,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 3,
+     "gap_days": 2,
+     "stability": 1.11336220764925,
+     "difficulty": 9.114918687895939,
+     "state": "learning",
+     "step": 1,
+     "due_offset_ms": 600000
+    },
+    {
+     "rating": 3,
+     "gap_days": 8,
+     "stability": 4.392973673891015,
+     "difficulty": 9.10103213850488,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 345600000
+    },
+    {
+     "rating": 2,
+     "gap_days": 20,
+     "stability": 9.523920176806664,
+     "difficulty": 9.38845161093403,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 864000000
+    },
+    {
+     "rating": 4,
+     "gap_days": 45,
+     "stability": 35.8101067179514,
+     "difficulty": 9.169329006759952,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 3110400000
+    },
+    {
+     "rating": 3,
+     "gap_days": 100,
+     "stability": 72.8486326592156,
+     "difficulty": 9.15538804705003,
+     "state": "review",
+     "step": null,
+     "due_offset_ms": 6307200000
+    }
+   ]
+  },
+  {
+   "seq": 5,
+   "steps": [
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.212,
+     "difficulty": 6.4133,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.08335671711031604,
+     "difficulty": 8.806304468856837,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.03485140985964798,
+     "difficulty": 9.592868765339693,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    },
+    {
+     "rating": 1,
+     "gap_days": 0,
+     "stability": 0.01543191751473265,
+     "difficulty": 9.85140710095639,
+     "state": "learning",
+     "step": 0,
+     "due_offset_ms": 60000
+    }
+   ]
+  }
+ ]
+}

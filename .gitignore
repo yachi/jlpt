@@ -1,0 +1,6 @@
+node_modules/
+audio/
+data/study.db*
+data/tts-usage.json
+.env
+.claude/

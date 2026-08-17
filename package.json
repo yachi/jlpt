@@ -1,0 +1,13 @@
+{
+  "name": "jlpt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JLPT N5/N4 study CLI — FSRS-6 scheduling, JLPT-format multiple choice, Azure neural TTS listening practice, and mock exams scored against the real sectional floors.",
+  "scripts": {
+    "seed": "bun src/cli.ts seed",
+    "study": "bun src/cli.ts study",
+    "cli": "bun src/cli.ts",
+    "test": "bun test"
+  }
+}
