@@ -79,6 +79,15 @@ export interface Question {
   promptReading?: string;
   /** Japanese to synthesize, if this question has audio. */
   audioText?: string;
+  /**
+   * Whether that audio IS the question, rather than a reveal aid.
+   *
+   * `meaning` cards also carry audioText — to play the word back *after*
+   * answering — so audio-bearing and audio-is-the-stimulus are two different
+   * properties. Playing a meaning card's audio up front would just narrate a
+   * word already on screen; playing a listening card's is the whole card.
+   */
+  audioIsStimulus?: boolean;
   /** MC options; empty for typed production. */
   choices: string[];
   answerIndex: number;
@@ -230,13 +239,24 @@ export function buildQuestion(
     case "listening": {
       const { choices, answerIndex } = shuffleWithAnswer(meaning, distractors(db, item, "meaning", 3, rng), rng);
       return { ...base, instruction: "Listen, then choose the meaning. (聴解)", prompt: "",
-        audioText: item.expression, choices, answerIndex, answer: meaning };
+        audioText: item.expression, audioIsStimulus: true, choices, answerIndex, answer: meaning };
     }
     case "production": {
       return { ...base, instruction: "Type the Japanese reading (kana).", prompt: meaning,
         choices: [], answerIndex: -1, answer: item.reading };
     }
   }
+}
+
+/**
+ * Whether the audio must be played for the question to be answerable.
+ *
+ * Ask the question, not its mode. Three call sites used to test
+ * `q.mode === "listening"` instead, so any future audio-bearing mode had to
+ * remember to update all three — and one of them had already drifted.
+ */
+export function hasAudioStimulus(q: Question): q is Question & { audioText: string } {
+  return q.audioIsStimulus === true && typeof q.audioText === "string" && q.audioText !== "";
 }
 
 /** Normalize typed input: NFKC, strip whitespace and the ~ placeholder used in the lists. */

@@ -10,7 +10,7 @@ import { openDb, getSetting, setSetting, MODES, type Mode } from "./db";
 import { seed } from "./bank";
 import {
   nextQuestion, grade, dueCount, humanInterval, scheduler,
-  introducedByMode, parseModeWeights, modePriority,
+  introducedByMode, parseModeWeights, modePriority, hasAudioStimulus,
   type Question,
 } from "./quiz";
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS,
@@ -54,9 +54,8 @@ function renderQuestion(q: Question, n?: number): string {
   return `${n !== undefined ? C.dim(`#${n}  `) : ""}${head}${body}\n${choices}\n`;
 }
 
-async function maybeSpeak(q: Question, voices: SpeakOptions, force = false) {
-  if (!q.audioText) return;
-  if (q.mode === "listening" || force) await speak(q.audioText, { rate: "-10%", ...voices });
+async function maybeSpeak(q: Question, voices: SpeakOptions) {
+  if (hasAudioStimulus(q)) await speak(q.audioText, { rate: "-10%", ...voices });
 }
 
 // ---------------------------------------------------------------- commands
@@ -103,8 +102,8 @@ async function cmdNext() {
     // Synthesize before printing and hand back the path: a conversational
     // driver cannot play what it cannot name, and re-deriving it with a second
     // `tts` call would roll a different voice and a second cache entry.
-    const audio = q.mode === "listening"
-      ? await synthesize(q.audioText!, { rate: "-10%", ...voices })
+    const audio = hasAudioStimulus(q)
+      ? await synthesize(q.audioText, { rate: "-10%", ...voices })
       : null;
     console.log(JSON.stringify({
       question: { ...safe, audioPath: audio?.path, audioVoice: audio?.voice },
@@ -209,7 +208,7 @@ async function cmdExam() {
         ?? nextQuestion(db, { level, mode, newLimit: 9999 });
       if (!q) break;
       console.log(renderQuestion(q, i + 1));
-      await maybeSpeak(q, mode === "listening");
+      await maybeSpeak(q, pickVoices());
       const raw = (prompt("  > ") ?? "").trim();
       const idx = q.mode === "production" ? raw : String(Number(raw) - 1);
       // Score only; do not disturb scheduling state.

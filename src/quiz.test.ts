@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
-  parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS } from "./quiz";
+  parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus } from "./quiz";
 import { synthesize, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
   MACOS_JA_VOICES, AZURE_JA_VOICES } from "./tts";
 
@@ -122,6 +122,25 @@ describe("question construction", () => {
     const q = buildQuestion(db, items[0]!, "listening", false, mulberry(1));
     expect(q.prompt).toBe("");
     expect(q.audioText).toBeTruthy();
+  });
+
+  test("only listening plays before the answer, though meaning also has audio", () => {
+    // Two different properties. `meaning` carries audioText for post-answer
+    // playback; playing it up front would narrate the word already on screen.
+    // The playback path must key off the stimulus flag, never off the mode
+    // string — a new audio-bearing mode would otherwise play silence.
+    const item = items.find((i) => i.has_kanji === 1)!;
+    for (const mode of MODES) {
+      const q = buildQuestion(db, item, mode, false, mulberry(3));
+      expect({ mode, stimulus: hasAudioStimulus(q) })
+        .toEqual({ mode, stimulus: mode === "listening" });
+    }
+    expect(buildQuestion(db, item, "meaning", false, mulberry(3)).audioText).toBeTruthy();
+
+    const listening = buildQuestion(db, item, "listening", false, mulberry(3));
+    expect(hasAudioStimulus({ ...listening, mode: "meaning" })).toBe(true);
+    expect(hasAudioStimulus({ ...listening, audioText: "" })).toBe(false);
+    expect(hasAudioStimulus({ ...listening, audioIsStimulus: undefined })).toBe(false);
   });
 
   test("reading cards are never created for kana-only words", () => {
