@@ -6,9 +6,11 @@
  *   2. macOS `say` fallback (offline, zero-config, lower quality), rotating over
  *      the installed ja_JP voices — see MACOS_JA_VOICES below
  *
- * Azure Free (F0) tier constraints enforced here (learn.microsoft.com):
+ * Azure Free (F0) tier constraints enforced here (re-verified 2026-08-23):
  *   - 0.5M neural characters/month  -> tracked in data/tts-usage.json, hard-stops at the cap
+ *     azure.microsoft.com/pricing/details/cognitive-services/speech-services
  *   - 20 TTS transactions / 60 s    -> client-side token bucket, not adjustable on F0
+ *     learn.microsoft.com/azure/ai-services/speech-service/speech-services-quotas-and-limits
  *   - batch synthesis unavailable   -> we use the real-time /cognitiveservices/v1 endpoint
  * Every clip is cached on disk, so a given sentence costs characters exactly once.
  */
@@ -73,9 +75,41 @@ export const MACOS_JA_VOICES: readonly string[] =
   (process.env.MACOS_JA_VOICES ?? "Kyoko,Eddy,Flo,Reed,Sandy,Shelley")
     .split(",").map((s) => s.trim()).filter((s) => s !== "");
 
+/**
+ * Azure ja-JP neural voices to draw from, for the same reason as the macOS
+ * list: one speaker trains waveform recall, not phoneme discrimination.
+ * Four female and four male, mirroring the exam's mixed speakers.
+ * `AZURE_SPEECH_VOICE` still pins a single voice when set.
+ */
+export const AZURE_JA_VOICES: readonly string[] =
+  (process.env.AZURE_SPEECH_VOICES ?? [
+    "ja-JP-NanamiNeural", "ja-JP-AoiNeural", "ja-JP-MayuNeural", "ja-JP-ShioriNeural",
+    "ja-JP-KeitaNeural", "ja-JP-DaichiNeural", "ja-JP-NaokiNeural",
+    "ja-JP-MasaruMultilingualNeural",
+  ].join(","))
+    .split(",").map((s) => s.trim()).filter((s) => s !== "");
+
+function pick(list: readonly string[], fallback: string, rng: () => number): string {
+  return list[Math.floor(rng() * list.length)] ?? fallback;
+}
+
 /** Pick one of the configured macOS voices. */
 export function pickMacVoice(rng: () => number = Math.random): string {
-  return MACOS_JA_VOICES[Math.floor(rng() * MACOS_JA_VOICES.length)] ?? "Kyoko";
+  return pick(MACOS_JA_VOICES, "Kyoko", rng);
+}
+
+/** Pick one of the configured Azure voices, unless AZURE_SPEECH_VOICE pins one. */
+export function pickAzureVoice(rng: () => number = Math.random): string {
+  return process.env.AZURE_SPEECH_VOICE ?? pick(AZURE_JA_VOICES, "ja-JP-NanamiNeural", rng);
+}
+
+/**
+ * One roll for both providers. Callers that rotated only the macOS voice would
+ * silently fall back to a single Azure speaker the moment a key was set — the
+ * bug this shape exists to prevent.
+ */
+export function pickVoices(rng: () => number = Math.random): { voice: string; macVoice: string } {
+  return { voice: pickAzureVoice(rng), macVoice: pickMacVoice(rng) };
 }
 
 function escapeXml(s: string): string {
@@ -83,7 +117,8 @@ function escapeXml(s: string): string {
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!);
 }
 
-function cacheKey(text: string, voice: string, rate: string): string {
+/** Exported for tests: the key must include the voice, or clips cross-serve. */
+export function cacheKey(text: string, voice: string, rate: string): string {
   return new Bun.CryptoHasher("sha256").update(`${voice}|${rate}|${text}`).digest("hex").slice(0, 20);
 }
 

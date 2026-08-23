@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync, existsSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,8 @@ import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
   parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS } from "./quiz";
-import { synthesize, pickMacVoice, MACOS_JA_VOICES } from "./tts";
+import { synthesize, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
+  MACOS_JA_VOICES, AZURE_JA_VOICES } from "./tts";
 
 const db = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-")), "t.db"));
 let items: Item[];
@@ -445,6 +446,21 @@ describe("scheduling integration", () => {
 });
 
 describe("TTS cache safety", () => {
+  // These tests synthesize for real. Pin them to the offline macOS provider:
+  // with a key in the environment they would hit the network, spend Azure
+  // quota, and — worse — silently test a different code path than on a machine
+  // without one. A test whose meaning depends on ambient env is not a test.
+  let saved: Record<string, string | undefined> = {};
+  beforeAll(() => {
+    saved = { key: process.env.AZURE_SPEECH_KEY, region: process.env.AZURE_SPEECH_REGION };
+    delete process.env.AZURE_SPEECH_KEY;
+    delete process.env.AZURE_SPEECH_REGION;
+  });
+  afterAll(() => {
+    if (saved.key !== undefined) process.env.AZURE_SPEECH_KEY = saved.key;
+    if (saved.region !== undefined) process.env.AZURE_SPEECH_REGION = saved.region;
+  });
+
   test("a zero-byte cache entry is treated as a miss, not served", async () => {
     // Regression: a synthesis that dies partway used to leave a 0-byte file
     // that every later lookup happily returned as a valid cache hit.
@@ -487,6 +503,36 @@ describe("TTS cache safety", () => {
     expect(hit).toMatchObject({ provider: "cache", voice: "Eddy", path: b!.path });
     rmSync(a!.path, { force: true });
     rmSync(b!.path, { force: true });
+  });
+
+  test("the cache key names the voice, for either provider", () => {
+    // The property that matters, tested without a network call: two voices must
+    // never collide on one key, or one speaker's clip is served for another.
+    const t = "テスト";
+    expect(cacheKey(t, "Kyoko", "0%")).not.toBe(cacheKey(t, "Eddy", "0%"));
+    expect(cacheKey(t, "ja-JP-NanamiNeural", "0%")).not.toBe(cacheKey(t, "ja-JP-KeitaNeural", "0%"));
+    expect(cacheKey(t, "Kyoko", "0%")).not.toBe(cacheKey(t, "Kyoko", "-10%"));
+    expect(cacheKey(t, "Kyoko", "0%")).toBe(cacheKey(t, "Kyoko", "0%"));
+  });
+
+  test("pickVoices rolls both providers, not just the installed one", () => {
+    // Regression guard: rotating only the macOS voice collapsed Azure to a
+    // single speaker the moment a key was set.
+    const rng = mulberry(23);
+    const seen = { voice: new Set<string>(), macVoice: new Set<string>() };
+    for (let i = 0; i < 400; i++) {
+      const v = pickVoices(rng);
+      seen.voice.add(v.voice);
+      seen.macVoice.add(v.macVoice);
+    }
+    expect(seen.voice.size).toBe(AZURE_JA_VOICES.length);
+    expect(seen.macVoice.size).toBe(MACOS_JA_VOICES.length);
+  });
+
+  test("pickAzureVoice only ever returns a configured voice", () => {
+    for (const r of [0, 0.5, 0.999999, 1 - Number.EPSILON]) {
+      expect(AZURE_JA_VOICES).toContain(pickAzureVoice(() => r));
+    }
   });
 
   test("pickMacVoice only ever returns a configured voice", () => {
