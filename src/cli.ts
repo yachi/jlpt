@@ -13,7 +13,8 @@ import {
   introducedByMode, parseModeWeights, modePriority,
   type Question,
 } from "./quiz";
-import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS, DEFAULT_VOICE } from "./tts";
+import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS, DEFAULT_VOICE,
+  pickMacVoice, MACOS_JA_VOICES } from "./tts";
 
 const db = openDb();
 const argv = Bun.argv.slice(2);
@@ -53,9 +54,9 @@ function renderQuestion(q: Question, n?: number): string {
   return `${n !== undefined ? C.dim(`#${n}  `) : ""}${head}${body}\n${choices}\n`;
 }
 
-async function maybeSpeak(q: Question, force = false) {
+async function maybeSpeak(q: Question, macVoice: string, force = false) {
   if (!q.audioText) return;
-  if (q.mode === "listening" || force) await speak(q.audioText, { rate: "-10%" });
+  if (q.mode === "listening" || force) await speak(q.audioText, { rate: "-10%", macVoice });
 }
 
 // ---------------------------------------------------------------- commands
@@ -94,15 +95,25 @@ async function cmdNext() {
   pendingSave(q);
   setSetting(db, "pending_shown_at", String(Date.now()));
 
+  const macVoice = pickMacVoice();
+
   if (JSON_OUT) {
     // answerIndex withheld so an LLM driving this can't see the key.
     const { answerIndex, answer, reveal, ...safe } = q;
-    console.log(JSON.stringify({ question: safe, ...dueCount(db) }));
-    if (q.mode === "listening") await synthesize(q.audioText!, { rate: "-10%" });
+    // Synthesize before printing and hand back the path: a conversational
+    // driver cannot play what it cannot name, and re-deriving it with a second
+    // `tts` call would roll a different voice and a second cache entry.
+    const audio = q.mode === "listening"
+      ? await synthesize(q.audioText!, { rate: "-10%", macVoice })
+      : null;
+    console.log(JSON.stringify({
+      question: { ...safe, audioPath: audio?.path, audioVoice: audio?.voice },
+      ...dueCount(db),
+    }));
     return;
   }
   console.log(renderQuestion(q));
-  await maybeSpeak(q);
+  await maybeSpeak(q, macVoice);
 }
 
 async function cmdAnswer() {
@@ -134,7 +145,9 @@ async function cmdStudy() {
   const level = levelOpt(), mode = modeOpt();
   const limit = Number.parseInt(opt("n", "20") ?? "20", 10);
   console.log(C.bold(`\nJLPT study — ${level} · ${mode} · up to ${limit} cards`));
-  console.log(C.dim(`TTS: ${azureConfigured() ? `Azure ${DEFAULT_VOICE}` : "macOS Kyoko (set AZURE_SPEECH_KEY for neural voices)"}`));
+  console.log(C.dim(`TTS: ${azureConfigured()
+    ? `Azure ${DEFAULT_VOICE}`
+    : `macOS voices ${MACOS_JA_VOICES.join("/")} (set AZURE_SPEECH_KEY for neural voices)`}`));
   console.log(C.dim("Answer with 1-4, type kana for production cards, 'r' to replay audio, 'q' to quit.\n"));
 
   let asked = 0, right = 0;
@@ -142,14 +155,17 @@ async function cmdStudy() {
     const q = nextQuestion(db, { level, mode });
     if (!q) { console.log(C.yellow("\nNothing more due right now.")); break; }
     console.log(renderQuestion(q, asked + 1));
-    await maybeSpeak(q);
+    // One speaker per question: the exam plays the same recording twice, so a
+    // replay must be the same clip, not a second roll of the dice.
+    const macVoice = pickMacVoice();
+    await maybeSpeak(q, macVoice);
 
     const t0 = Date.now();
     let response: string | null = null;
     for (;;) {
       const raw = (prompt("  > ") ?? "q").trim();
       if (raw === "q") { console.log(C.dim("\nbye")); printSummary(asked, right); return; }
-      if (raw === "r") { await speak(q.audioText ?? q.prompt, { rate: "-10%" }); continue; }
+      if (raw === "r") { await speak(q.audioText ?? q.prompt, { rate: "-10%", macVoice }); continue; }
       response = raw;
       break;
     }
@@ -158,7 +174,7 @@ async function cmdStudy() {
     asked++; if (r.correct) right++;
     console.log(r.correct ? C.green("  ✓ correct") : C.red(`  ✗ wrong — ${r.answer}`));
     console.log(`  ${C.dim(r.reveal)}   ${C.dim(`next: ${r.intervalHuman}`)}\n`);
-    if (!r.correct && q.audioText) await speak(q.audioText, { rate: "-20%" });
+    if (!r.correct && q.audioText) await speak(q.audioText, { rate: "-20%", macVoice });
   }
   printSummary(asked, right);
 }
@@ -289,9 +305,12 @@ async function cmdStats() {
 
 async function cmdTts() {
   const text = argv.slice(1).filter((a) => !a.startsWith("--")).join(" ") || "こんにちは。日本語の勉強を始めましょう。";
-  const r = await speak(text, { rate: opt("rate", "0%") });
+  // A fresh speaker each time, unless pinned: replaying one voice trains
+  // waveform recall, and the exam does not use one voice.
+  const macVoice = opt("voice", "") || pickMacVoice();
+  const r = await speak(text, { rate: opt("rate", "0%"), macVoice });
   if (!r) { console.log(C.red("TTS unavailable.")); return; }
-  console.log(`${C.dim(`[${r.provider}]`)} ${text}\n${C.dim(r.path)}`);
+  console.log(`${C.dim(`[${r.provider}:${r.voice}]`)} ${text}\n${C.dim(r.path)}`);
 }
 
 function cmdSet() {

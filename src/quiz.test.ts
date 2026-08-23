@@ -6,7 +6,7 @@ import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
   parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS } from "./quiz";
-import { synthesize } from "./tts";
+import { synthesize, pickMacVoice, MACOS_JA_VOICES } from "./tts";
 
 const db = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-")), "t.db"));
 let items: Item[];
@@ -468,5 +468,39 @@ describe("TTS cache safety", () => {
     expect(r).not.toBeNull();
     expect(existsSync(`${r!.path}.part`)).toBe(false);
     rmSync(r!.path, { force: true });
+  });
+
+  test("each voice gets its own cache entry", async () => {
+    // Regression: the cache key hardcoded the voice name, so switching voices
+    // replayed the previous voice's clip — silently defeating the whole point
+    // of rotating speakers.
+    const text = `声試験${Date.now()}`;
+    const a = await synthesize(text, { macVoice: "Kyoko" });
+    const b = await synthesize(text, { macVoice: "Eddy" });
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a!.path).not.toBe(b!.path);
+    expect(a!.voice).toBe("Kyoko");
+    expect(b!.voice).toBe("Eddy");
+    // A hit must report the voice it was stored under, not the default.
+    const hit = await synthesize(text, { macVoice: "Eddy", cacheOnly: true });
+    expect(hit).toMatchObject({ provider: "cache", voice: "Eddy", path: b!.path });
+    rmSync(a!.path, { force: true });
+    rmSync(b!.path, { force: true });
+  });
+
+  test("pickMacVoice only ever returns a configured voice", () => {
+    // Boundary rng values are where an off-by-one index lands on undefined.
+    for (const r of [0, 0.5, 0.999999, 1 - Number.EPSILON]) {
+      expect(MACOS_JA_VOICES).toContain(pickMacVoice(() => r));
+    }
+  });
+
+  test("pickMacVoice actually varies across the configured voices", () => {
+    // One rng instance — a fresh mulberry per call replays the same first value
+    // and would pass this test against a constant-voice implementation.
+    const rng = mulberry(11);
+    const seen = new Set(Array.from({ length: 400 }, () => pickMacVoice(rng)));
+    expect(seen.size).toBe(MACOS_JA_VOICES.length);
   });
 });

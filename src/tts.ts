@@ -3,7 +3,8 @@
  *
  * Provider order:
  *   1. Azure AI Speech (neural, ja-JP) when AZURE_SPEECH_KEY + AZURE_SPEECH_REGION are set
- *   2. macOS `say -v Kyoko` fallback (offline, zero-config, lower quality)
+ *   2. macOS `say` fallback (offline, zero-config, lower quality), rotating over
+ *      the installed ja_JP voices — see MACOS_JA_VOICES below
  *
  * Azure Free (F0) tier constraints enforced here (learn.microsoft.com):
  *   - 0.5M neural characters/month  -> tracked in data/tts-usage.json, hard-stops at the cap
@@ -59,6 +60,24 @@ export function azureConfigured(): boolean {
 
 export const DEFAULT_VOICE = process.env.AZURE_SPEECH_VOICE ?? "ja-JP-NanamiNeural";
 
+/**
+ * macOS ja_JP voices to draw from. The real exam uses several speakers, so
+ * hearing every word in one voice trains recognition of that waveform rather
+ * than of the phonemes — the あける/あげる confusion this bank keeps surfacing
+ * is exactly the kind that a single speaker hides.
+ *
+ * Override with MACOS_JA_VOICES="A,B,C"; check what is installed with
+ * `say -v '?' | grep ja_JP`.
+ */
+export const MACOS_JA_VOICES: readonly string[] =
+  (process.env.MACOS_JA_VOICES ?? "Kyoko,Eddy,Flo,Reed,Sandy,Shelley")
+    .split(",").map((s) => s.trim()).filter((s) => s !== "");
+
+/** Pick one of the configured macOS voices. */
+export function pickMacVoice(rng: () => number = Math.random): string {
+  return MACOS_JA_VOICES[Math.floor(rng() * MACOS_JA_VOICES.length)] ?? "Kyoko";
+}
+
 function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) =>
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!);
@@ -69,7 +88,13 @@ function cacheKey(text: string, voice: string, rate: string): string {
 }
 
 export interface SpeakOptions {
+  /** Azure neural voice name, e.g. "ja-JP-NanamiNeural". */
   voice?: string;
+  /**
+   * macOS `say` voice name, e.g. "Kyoko". Kept separate from `voice` because
+   * the two namespaces are disjoint — handing an Azure name to `say` fails.
+   */
+  macVoice?: string;
   /** SSML prosody rate, e.g. "-20%" for JLPT-style slow listening practice. */
   rate?: string;
   /** Never call the network; return null if not already cached. */
@@ -79,22 +104,28 @@ export interface SpeakOptions {
 export interface SynthResult {
   path: string;
   provider: "azure" | "macos" | "cache";
+  /** The voice actually used, so a caller can report or reproduce it. */
+  voice: string;
   charsBilled: number;
 }
 
 /** Synthesize `text` to a cached audio file. Returns null if unavailable. */
 export async function synthesize(text: string, opts: SpeakOptions = {}): Promise<SynthResult | null> {
   const voice = opts.voice ?? DEFAULT_VOICE;
+  const macVoice = opts.macVoice ?? process.env.MACOS_JA_VOICE ?? "Kyoko";
   const rate = opts.rate ?? "0%";
   mkdirSync(AUDIO_DIR, { recursive: true });
 
   const useAzure = azureConfigured();
   const ext = useAzure ? "mp3" : "aiff";
-  const path = join(AUDIO_DIR, `${cacheKey(text, useAzure ? voice : "macos-kyoko", rate)}.${ext}`);
+  // The key must name the voice actually used. Hardcoding it meant switching
+  // macOS voices silently replayed the previous voice's cached clip.
+  const activeVoice = useAzure ? voice : macVoice;
+  const path = join(AUDIO_DIR, `${cacheKey(text, activeVoice, rate)}.${ext}`);
   // A zero-byte file means a previous synthesis died partway. Treat it as a miss,
   // otherwise a single transient failure poisons the cache entry permanently.
   if (existsSync(path)) {
-    if (statSync(path).size > 0) return { path, provider: "cache", charsBilled: 0 };
+    if (statSync(path).size > 0) return { path, provider: "cache", voice: activeVoice, charsBilled: 0 };
     rmSync(path, { force: true });
   }
   if (opts.cacheOnly) return null;
@@ -130,7 +161,7 @@ export async function synthesize(text: string, opts: SpeakOptions = {}): Promise
           await Bun.write(tmp, bytes);
           renameSync(tmp, path); // atomic: readers never observe a partial file
           await writeUsage({ month: usage.month, chars: usage.chars + text.length, requests: usage.requests + 1 });
-          return { path, provider: "azure", charsBilled: text.length };
+          return { path, provider: "azure", voice, charsBilled: text.length };
         }
         console.error("[tts] Azure returned an empty body; falling back to macOS voice.");
       } else {
@@ -140,7 +171,6 @@ export async function synthesize(text: string, opts: SpeakOptions = {}): Promise
   }
 
   if (process.platform !== "darwin") return null;
-  const macVoice = process.env.MACOS_JA_VOICE ?? "Kyoko";
   // `say` rate is words/min; approximate the SSML percentage.
   const pct = Number.parseInt(rate, 10) || 0;
   const wpm = Math.max(90, Math.round(180 * (1 + pct / 100)));
@@ -154,7 +184,7 @@ export async function synthesize(text: string, opts: SpeakOptions = {}): Promise
     return null;
   }
   renameSync(tmp, path);
-  return { path, provider: "macos", charsBilled: 0 };
+  return { path, provider: "macos", voice: macVoice, charsBilled: 0 };
 }
 
 /** Synthesize (if needed) and play through the speakers. */
