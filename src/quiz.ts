@@ -52,7 +52,11 @@ export function modePriority(
 }
 
 export function introducedByMode(db: Database): Record<Mode, number> {
-  const counts = { meaning: 0, reading: 0, listening: 0, production: 0 } as Record<Mode, number>;
+  // Annotated, NOT `as` — the cast would let a newly added mode compile with an
+  // undefined count, and modePriority sums these: one undefined turns `total`
+  // into NaN, every deficit into NaN, and the sort silently collapses to
+  // declaration order. A missing key must be a compile error.
+  const counts: Record<Mode, number> = { meaning: 0, reading: 0, listening: 0, production: 0 };
   for (const r of db.query<{ mode: Mode; n: number }, []>(
     "SELECT mode, COUNT(*) AS n FROM cards WHERE introduced = 1 GROUP BY mode").all()) {
     counts[r.mode] = r.n;
