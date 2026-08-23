@@ -310,6 +310,24 @@ describe("scheduling integration", () => {
     fresh.close();
   });
 
+  test("the sibling-cooldown subquery uses an index, not a table scan", () => {
+    // Regression: this correlated subquery runs per candidate row on EVERY
+    // `next` call, and `reviews` grows forever. Unindexed it took 27s for 400
+    // calls and degraded from there. Asserting the query plan is deterministic;
+    // asserting wall-clock would be flaky.
+    const plan = db
+      .query<{ detail: string }, [number]>(
+        "EXPLAIN QUERY PLAN SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = ?")
+      .all(1)
+      .map((r) => r.detail)
+      .join(" | ");
+    // Must be a CONSTRAINED lookup on item_id. Asserting merely "USING INDEX"
+    // is not enough: without idx_reviews_item, SQLite happily reports
+    // "SEARCH r USING INDEX idx_reviews_ts" while traversing the whole index —
+    // a full scan wearing a disguise. The "(item_id=?)" term is the real proof.
+    expect(plan, `plan was: ${plan}`).toMatch(/\(item_id=/);
+  });
+
   test("humanInterval renders each magnitude", () => {
     expect(humanInterval(60_000)).toBe("1m");
     expect(humanInterval(3 * 3_600_000)).toBe("3h");

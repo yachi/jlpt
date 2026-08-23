@@ -74,6 +74,11 @@ export function openDb(path = DB_PATH): Database {
 
     CREATE INDEX IF NOT EXISTS idx_cards_due  ON cards(introduced, due);
     CREATE INDEX IF NOT EXISTS idx_reviews_ts ON reviews(ts);
+    -- nextQuestion() runs a correlated "when did I last see this word?" subquery
+    -- per candidate row for the sibling cooldown. Without this index that is a
+    -- full scan of reviews on every single call, and reviews grows forever.
+    CREATE INDEX IF NOT EXISTS idx_reviews_item ON reviews(item_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_reviews_item_mode_id ON reviews(item_id, mode, id);
   `);
   return db;
 }
