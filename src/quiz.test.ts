@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
-import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval } from "./quiz";
+import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
+  parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS } from "./quiz";
 import { synthesize } from "./tts";
 
 const db = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-")), "t.db"));
@@ -326,6 +327,80 @@ describe("scheduling integration", () => {
     // "SEARCH r USING INDEX idx_reviews_ts" while traversing the whole index —
     // a full scan wearing a disguise. The "(item_id=?)" term is the real proof.
     expect(plan, `plan was: ${plan}`).toMatch(/\(item_id=/);
+  });
+
+  test("parseModeWeights: explicit spec is a complete statement of intent", () => {
+    expect(parseModeWeights("")).toEqual(DEFAULT_MODE_WEIGHTS);
+    expect(parseModeWeights("listening:50,reading:50"))
+      .toEqual({ listening: 50, reading: 50, meaning: 0, production: 0 });
+    expect(parseModeWeights("bogus:9")).toEqual(DEFAULT_MODE_WEIGHTS);   // no valid keys
+    expect(parseModeWeights("listening:0,reading:0,meaning:0,production:0"))
+      .toEqual(DEFAULT_MODE_WEIGHTS);                                     // all-zero is not a mix
+    expect(parseModeWeights("listening:-5,reading:10"))
+      .toEqual({ listening: 0, reading: 10, meaning: 0, production: 0 }); // negatives rejected
+  });
+
+  test("modePriority puts the most-starved mode first", () => {
+    const even = { meaning: 10, reading: 10, listening: 10, production: 10 };
+    // listening weighted heavily but equally represented -> it is owed the most
+    expect(modePriority(even, { listening: 70, meaning: 10, reading: 10, production: 10 })[0])
+      .toBe("listening");
+    // already over-represented -> it goes last
+    expect(modePriority({ meaning: 1, reading: 1, listening: 100, production: 1 },
+      { listening: 25, meaning: 25, reading: 25, production: 25 }).at(-1)).toBe("listening");
+  });
+
+  test("new-card mix converges on the configured weights", async () => {
+    const fresh = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-mix-")), "t.db"));
+    await seed(fresh);
+    setSetting(fresh, "new_per_day", "9999");
+    setSetting(fresh, "mode_weights", "listening:50,reading:25,meaning:15,production:10");
+
+    const now = Date.parse("2026-07-01T09:00:00Z");
+    const seen: Record<string, number> = {};
+    for (let i = 0; i < 200; i++) {
+      const q = nextQuestion(fresh, { now, rng: mulberry(i) });
+      if (!q) break;
+      if (q.isNew) seen[q.mode] = (seen[q.mode] ?? 0) + 1;
+      grade(fresh, q, q.answerIndex, 500, { now });
+    }
+    const total = Object.values(seen).reduce((a, b) => a + b, 0);
+    const share = (m: string) => ((seen[m] ?? 0) / total) * 100;
+    expect(total).toBeGreaterThan(50);
+    expect(share("listening"), `mix: ${JSON.stringify(seen)}`).toBeGreaterThan(40);
+    expect(share("listening")).toBeLessThan(60);
+    expect(share("meaning")).toBeLessThan(25);
+    fresh.close();
+  });
+
+  test("changing weights REPAIRS an existing imbalance, not just future cards", async () => {
+    const fresh = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-repair-")), "t.db"));
+    await seed(fresh);
+    setSetting(fresh, "new_per_day", "9999");
+    const now = Date.parse("2026-07-01T09:00:00Z");
+
+    // Phase 1: meaning-only, creating exactly the listening deficit we had.
+    setSetting(fresh, "mode_weights", "meaning:100");
+    for (let i = 0; i < 40; i++) {
+      const q = nextQuestion(fresh, { now, rng: mulberry(i) });
+      if (!q) break;
+      grade(fresh, q, q.answerIndex, 500, { now });
+    }
+    const before = introducedByMode(fresh);
+    expect(before.listening).toBe(0);
+
+    // Phase 2: switch to an even mix. Listening should be served first to catch up.
+    setSetting(fresh, "mode_weights", "");
+    const firstTen: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const q = nextQuestion(fresh, { now, rng: mulberry(100 + i) });
+      if (!q) break;
+      if (q.isNew) firstTen.push(q.mode);
+      grade(fresh, q, q.answerIndex, 500, { now });
+    }
+    expect(firstTen.filter((m) => m === "listening").length,
+      `first ten after switch: ${firstTen.join(",")}`).toBeGreaterThan(2);
+    fresh.close();
   });
 
   test("humanInterval renders each magnitude", () => {

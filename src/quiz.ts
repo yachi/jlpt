@@ -8,6 +8,57 @@ export const scheduler = new Scheduler();
 /** How long to wait before introducing another mode of the same word. */
 export const SIBLING_COOLDOWN_MS = 20 * 60 * 60 * 1000; // 20h — i.e. "not the same day"
 
+/** Default target share of introduced cards per mode. Equal split. */
+export const DEFAULT_MODE_WEIGHTS: Record<Mode, number> = {
+  meaning: 25, reading: 25, listening: 25, production: 25,
+};
+
+/** Parse "listening:50,reading:25,production:15,meaning:10". Unknown keys ignored. */
+export function parseModeWeights(spec: string): Record<Mode, number> {
+  const out = { ...DEFAULT_MODE_WEIGHTS };
+  if (!spec.trim()) return out;
+  const parsed: Partial<Record<Mode, number>> = {};
+  for (const part of spec.split(",")) {
+    const [k, v] = part.split(":").map((s) => s.trim());
+    const n = Number(v);
+    if (k && (MODES as readonly string[]).includes(k) && Number.isFinite(n) && n >= 0) {
+      parsed[k as Mode] = n;
+    }
+  }
+  if (Object.keys(parsed).length === 0) return out;
+  // Unspecified modes get 0 — an explicit spec is a complete statement of intent.
+  for (const m of MODES) out[m] = parsed[m] ?? 0;
+  if (MODES.every((m) => out[m] === 0)) return { ...DEFAULT_MODE_WEIGHTS };
+  return out;
+}
+
+/**
+ * Order modes by how far each is BELOW its target share of introduced cards.
+ * Deterministic, and self-correcting: a mode that has fallen behind is picked
+ * first until it catches up, so changing the weights repairs an existing
+ * imbalance instead of only affecting cards from here on.
+ */
+export function modePriority(
+  counts: Record<Mode, number>, weights: Record<Mode, number>,
+): Mode[] {
+  const total = MODES.reduce((a, m) => a + counts[m], 0);
+  const weightSum = MODES.reduce((a, m) => a + weights[m], 0) || 1;
+  return [...MODES].sort((a, b) => {
+    const deficit = (m: Mode) => (weights[m] / weightSum) * (total + 1) - counts[m];
+    const d = deficit(b) - deficit(a);
+    return d !== 0 ? d : MODES.indexOf(a) - MODES.indexOf(b); // stable tiebreak
+  });
+}
+
+export function introducedByMode(db: Database): Record<Mode, number> {
+  const counts = { meaning: 0, reading: 0, listening: 0, production: 0 } as Record<Mode, number>;
+  for (const r of db.query<{ mode: Mode; n: number }, []>(
+    "SELECT mode, COUNT(*) AS n FROM cards WHERE introduced = 1 GROUP BY mode").all()) {
+    counts[r.mode] = r.n;
+  }
+  return counts;
+}
+
 export interface Question {
   itemId: number;
   mode: Mode;
@@ -109,6 +160,11 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
     // When enabled, kanji words skip `meaning` and go straight to reading /
     // listening / production — except Sino-Japanese false friends, where the
     // kanji background actively misleads and the meaning card earns its place.
+    // Mode is now chosen by deficit against the target mix, so a mode that has
+    // fallen behind (typically listening) is introduced first until it catches up.
+    const priority = modePriority(introducedByMode(db), parseModeWeights(getSetting(db, "mode_weights", "")));
+    const modeRank = `CASE c.mode ${priority.map((m, i) => `WHEN '${m}' THEN ${i}`).join(" ")} ELSE 99 END`;
+
     const skipKanjiMeaning = getSetting(db, "skip_meaning_for_kanji", "0") === "1"
       ? ` AND NOT (c.mode = 'meaning' AND i.has_kanji = 1
                    AND i.expression NOT IN (SELECT expression FROM false_friends))`
@@ -117,10 +173,9 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
       `SELECT c.*, i.level, i.expression, i.reading, i.meaning, i.has_kanji
          FROM cards c JOIN items i ON i.id = c.item_id
         WHERE c.introduced = 0${levelSql}${modeSql}${skipKanjiMeaning}
-        ORDER BY COALESCE((SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = c.item_id), 0) > ? ASC,
-                 CASE i.level WHEN 'N5' THEN 0 ELSE 1 END, c.item_id ASC,
-                 CASE c.mode WHEN 'meaning' THEN 0 WHEN 'reading' THEN 1
-                             WHEN 'listening' THEN 2 ELSE 3 END
+        ORDER BY ${modeRank} ASC,
+                 COALESCE((SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = c.item_id), 0) > ? ASC,
+                 CASE i.level WHEN 'N5' THEN 0 ELSE 1 END, c.item_id ASC
         LIMIT 1`,
       // NOTE: positional `?` bind in SQL text order — the WHERE params come
       // before the ORDER BY cutoff, so `cutoff` must go LAST.

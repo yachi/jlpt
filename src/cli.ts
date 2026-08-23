@@ -10,6 +10,7 @@ import { openDb, getSetting, setSetting, MODES, type Mode } from "./db";
 import { seed } from "./bank";
 import {
   nextQuestion, grade, dueCount, humanInterval, scheduler,
+  introducedByMode, parseModeWeights, modePriority,
   type Question,
 } from "./quiz";
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS, DEFAULT_VOICE } from "./tts";
@@ -254,6 +255,21 @@ async function cmdStats() {
       console.log(`  ${r.mode.padEnd(11)} ${String(r.n).padStart(5)} reviews  ${String(pct).padStart(3)}%${warn}`);
     }
   }
+  const counts = introducedByMode(db);
+  const weights = parseModeWeights(getSetting(db, "mode_weights", ""));
+  const introTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+  const wSum = Object.values(weights).reduce((a, b) => a + b, 0) || 1;
+  if (introTotal) {
+    console.log(C.bold("\nNew-card mix vs target"));
+    for (const m of modePriority(counts, weights)) {
+      const actual = (counts[m] / introTotal) * 100;
+      const target = (weights[m] / wSum) * 100;
+      const gap = actual - target;
+      const flag = gap < -10 ? C.yellow(" <- next up") : "";
+      console.log(`  ${m.padEnd(11)} ${counts[m].toString().padStart(4)} cards  ${actual.toFixed(0).padStart(3)}% vs ${target.toFixed(0).padStart(3)}% target${flag}`);
+    }
+  }
+
   const exams = db.query<any, []>("SELECT * FROM exams ORDER BY ts DESC LIMIT 5").all();
   if (exams.length) {
     console.log(C.bold("\nRecent mock exams"));
