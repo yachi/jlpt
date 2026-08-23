@@ -1,0 +1,53 @@
+# Sino-Japanese false friends: words a Chinese/Cantonese reader will misread
+# because the characters are familiar but the Japanese meaning has drifted.
+#
+# For a reader with a kanji background, `meaning` cards on kanji words are
+# mostly free points — EXCEPT these, where the kanji background actively
+# misleads. When `skip_meaning_for_kanji` is on, words listed here keep their
+# meaning card; everything else with kanji drops it.
+#
+# One expression per line, matching `items.expression` exactly.
+# This is a starting list — add to it whenever a word tricks you.
+
+# --- the classics ---
+手紙        # letter (NOT 廁紙)
+勉強        # to study (NOT 勉強/reluctantly)
+汽車        # steam train (NOT 汽車/car)
+娘          # daughter (NOT 娘/mother)
+丈夫        # sturdy, durable (NOT 丈夫/husband)
+大丈夫      # it's OK, no need to worry
+家内        # one's own wife
+切手        # postage stamp
+新聞        # newspaper (NOT 新聞/news)
+邪魔        # hindrance, nuisance (NOT 邪魔/evil demon)
+
+# --- motion verbs: 走 means walk in Chinese, run in Japanese ---
+走る        # to RUN
+歩く        # to walk
+
+# --- semantic drift ---
+湯          # hot water (NOT 湯/soup)
+青          # blue — but also covers green in Japanese (青信号)
+鳥          # chicken, as food (Chinese 鳥 is bird generally)
+野菜        # vegetables generally (NOT just wild vegetables)
+結構        # fine / quite / no thank you (NOT 結構/structure)
+本当        # real, true
+時計        # clock, watch
+部屋        # room
+台所        # kitchen
+財布        # wallet
+面白い      # interesting, amusing
+真面目      # diligent, serious
+
+# --- adverbs and set phrases that look transparent but aren't ---
+全然        # (not) at all — negative polarity
+無理        # impossible, unreasonable
+用意        # preparation (NOT 用意/intention)
+都合        # circumstances, convenience
+遠慮        # restraint, holding back
+心配        # worry
+一生懸命    # with all one's effort
+
+# --- 上手 / 下手 are about skill, not position ---
+上手        # good at
+下手        # bad at

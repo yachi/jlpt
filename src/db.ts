@@ -68,6 +68,10 @@ export function openDb(path = DB_PATH): Database {
 
     CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
+    -- Words whose kanji actively mislead a Chinese/Cantonese reader.
+    -- These keep their meaning card even when skip_meaning_for_kanji is on.
+    CREATE TABLE IF NOT EXISTS false_friends (expression TEXT PRIMARY KEY);
+
     CREATE INDEX IF NOT EXISTS idx_cards_due  ON cards(introduced, due);
     CREATE INDEX IF NOT EXISTS idx_reviews_ts ON reviews(ts);
   `);

@@ -70,6 +70,30 @@ reading is strong and the scheduler responds to each independently.
 | `listening` | **audio only** → 4 meanings | 聴解 | Listening |
 | `production` | English → type the kana | (none — deeper encoding) | Knowledge |
 
+### If you already read Chinese
+
+80% of the N5/N4 bank is written with kanji, and for a Chinese/Cantonese reader
+"what does 秋 mean?" is a free point. Turn those cards off:
+
+```fish
+bun run cli set skip_meaning_for_kanji 1
+```
+
+New `meaning` cards are then skipped for kanji words — **1,067 of 5,257 cards, about
+7 months of study at 5 cards/day** — while `reading`, `listening` and `production` are
+kept, because a kanji background does nothing for those.
+
+Two exceptions stay on:
+
+- **Kana-only words** (ああ, すっと) — no kanji to lean on.
+- **Sino-Japanese false friends**, listed in `data/false-friends.txt` — 手紙 (letter, not
+  廁紙), 娘 (daughter, not mother), 走る (to run, not to walk), 湯 (hot water, not soup),
+  丈夫 (sturdy, not husband)… Here the kanji background actively misleads, so the meaning
+  card earns its place.
+
+Add to that file whenever a word tricks you. A test asserts every line matches a real
+item, so a typo fails the suite instead of silently doing nothing.
+
 Multiple choice is the dominant format on purpose: the JLPT is 100% multiple choice, and the largest
 meta-analysis of practice testing (Adesope, Trevisan & Sundararajan 2017, *Review of Educational
 Research* 87, 659–701; 188 experiments, 272 effect sizes) found MC practice tests produce a **larger**

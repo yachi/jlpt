@@ -105,10 +105,18 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
     // listening 30s after seeing it as text tests short-term memory, not the word.
     // Siblings are deprioritised (not banned) until SIBLING_COOLDOWN_MS has passed.
     const cutoff = now - SIBLING_COOLDOWN_MS;
+    // For a learner with a kanji background, "what does 秋 mean?" is a free point.
+    // When enabled, kanji words skip `meaning` and go straight to reading /
+    // listening / production — except Sino-Japanese false friends, where the
+    // kanji background actively misleads and the meaning card earns its place.
+    const skipKanjiMeaning = getSetting(db, "skip_meaning_for_kanji", "0") === "1"
+      ? ` AND NOT (c.mode = 'meaning' AND i.has_kanji = 1
+                   AND i.expression NOT IN (SELECT expression FROM false_friends))`
+      : "";
     row = db.query<CardRow & Item, any[]>(
       `SELECT c.*, i.level, i.expression, i.reading, i.meaning, i.has_kanji
          FROM cards c JOIN items i ON i.id = c.item_id
-        WHERE c.introduced = 0${levelSql}${modeSql}
+        WHERE c.introduced = 0${levelSql}${modeSql}${skipKanjiMeaning}
         ORDER BY COALESCE((SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = c.item_id), 0) > ? ASC,
                  CASE i.level WHEN 'N5' THEN 0 ELSE 1 END, c.item_id ASC,
                  CASE c.mode WHEN 'meaning' THEN 0 WHEN 'reading' THEN 1

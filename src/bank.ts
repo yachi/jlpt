@@ -69,6 +69,8 @@ export async function seed(db: Database, now = Date.now()): Promise<{ items: num
   }
   tx(all);
 
+  await loadFalseFriends(db);
+
   const items = db.query<Item, []>("SELECT * FROM items").all();
   const cardTx = db.transaction(() => {
     for (const it of items) {
@@ -83,6 +85,30 @@ export async function seed(db: Database, now = Date.now()): Promise<{ items: num
 
   const cards = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM cards").get()!.n;
   return { items: items.length, cards };
+}
+
+/**
+ * Load data/false-friends.txt into the `false_friends` table.
+ * Format: one expression per line; `#` starts a comment; blanks ignored.
+ * Entries that don't match any item are reported, so typos surface instead of
+ * silently doing nothing.
+ */
+export async function loadFalseFriends(db: Database): Promise<{ loaded: number; unmatched: string[] }> {
+  const file = Bun.file(join(ROOT, "data", "false-friends.txt"));
+  if (!(await file.exists())) return { loaded: 0, unmatched: [] };
+
+  const expressions = (await file.text())
+    .split("\n")
+    .map((line) => line.split("#")[0]!.trim())
+    .filter(Boolean);
+
+  const ins = db.query("INSERT INTO false_friends (expression) VALUES (?) ON CONFLICT DO NOTHING");
+  db.transaction(() => { for (const e of expressions) ins.run(e); })();
+
+  const unmatched = expressions.filter(
+    (e) => !db.query("SELECT 1 FROM items WHERE expression = ?").get(e),
+  );
+  return { loaded: expressions.length, unmatched };
 }
 
 /**

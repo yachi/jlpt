@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync, statSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
-import { seed, parseCsv, shortMeaning, distractors, type Item } from "./bank";
+import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval } from "./quiz";
 import { synthesize } from "./tts";
 
@@ -257,6 +257,57 @@ describe("scheduling integration", () => {
       expect(after.itemId).not.toBe(first.itemId);
       fresh.close();
     });
+  });
+
+  test("skip_meaning_for_kanji drops free meaning cards but keeps false friends", async () => {
+    const fresh = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-ff-")), "t.db"));
+    await seed(fresh);
+    setSetting(fresh, "skip_meaning_for_kanji", "1");
+    setSetting(fresh, "new_per_day", "9999");
+
+    const now = Date.parse("2026-06-01T09:00:00Z");
+    const seenMeaning: { expr: string; kanji: number }[] = [];
+    for (let i = 0; i < 400; i++) {
+      const q = nextQuestion(fresh, { now, rng: mulberry(i) });
+      if (!q) break;
+      if (q.isNew && q.mode === "meaning") {
+        const it = fresh.query<{ has_kanji: number }, [number]>(
+          "SELECT has_kanji FROM items WHERE id = ?").get(q.itemId)!;
+        seenMeaning.push({ expr: q.prompt, kanji: it.has_kanji });
+      }
+      grade(fresh, q, q.answerIndex, 500, { now });
+    }
+
+    // Every kanji-bearing meaning card served must be a listed false friend.
+    const kanjiMeaning = seenMeaning.filter((s) => s.kanji === 1).map((s) => s.expr);
+    const ff = new Set(fresh.query<{ expression: string }, []>(
+      "SELECT expression FROM false_friends").all().map((r) => r.expression));
+    const leaked = kanjiMeaning.filter((e) => !ff.has(e));
+    expect(leaked, `free meaning cards leaked: ${leaked.slice(0, 5).join(" ")}`).toHaveLength(0);
+
+    // Kana-only words must still get meaning cards — they have no kanji to lean on.
+    expect(seenMeaning.some((s) => s.kanji === 0)).toBe(true);
+    fresh.close();
+  });
+
+  test("false friends are actually reachable as meaning cards", async () => {
+    const fresh = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-ff2-")), "t.db"));
+    await seed(fresh);
+    setSetting(fresh, "skip_meaning_for_kanji", "1");
+    const reachable = fresh.query<{ n: number }, []>(
+      `SELECT COUNT(*) AS n FROM cards c JOIN items i ON i.id = c.item_id
+        WHERE c.mode = 'meaning' AND i.has_kanji = 1
+          AND i.expression IN (SELECT expression FROM false_friends)`).get()!.n;
+    expect(reachable).toBeGreaterThan(20);
+    fresh.close();
+  });
+
+  test("every false-friends.txt entry matches a real item", async () => {
+    const fresh = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-ff3-")), "t.db"));
+    await seed(fresh);
+    const { unmatched } = await loadFalseFriends(fresh);
+    expect(unmatched, `typos in false-friends.txt: ${unmatched.join(" ")}`).toHaveLength(0);
+    fresh.close();
   });
 
   test("humanInterval renders each magnitude", () => {
