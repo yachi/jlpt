@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
 import { distractors, shortMeaning, type Item } from "./bank";
 import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
+import { readingKey } from "./romaji";
 
 export const scheduler = new Scheduler();
 
@@ -239,14 +240,27 @@ export function normalize(s: string): string {
   return s.normalize("NFKC").replace(/[\s　～~]/g, "").toLowerCase();
 }
 
+/**
+ * Bank entries list alternative writings in one field ("足; 脚"), so a typed
+ * answer has to be matched against each form, not against the joined string.
+ */
+const FORM_SEPARATOR = /[;；/／、,，]/;
+
 export function checkAnswer(q: Question, response: string | number): boolean {
-  if (q.mode === "production") {
-    const given = normalize(String(response));
-    // Accept the kana reading or the written form (an IME user may type either).
-    const item = q.reveal.match(/^(.+?)【(.+?)】/);
-    return given === normalize(q.answer) || (item ? given === normalize(item[1]!) : false);
-  }
-  return Number(response) === q.answerIndex;
+  if (q.mode !== "production") return Number(response) === q.answerIndex;
+
+  const given = normalize(String(response));
+  if (given === "") return false;
+  const givenKey = readingKey(given);
+
+  // Accept the kana reading or any written form — an IME user may type either,
+  // and readingKey() additionally accepts romaji for anyone without an IME.
+  const expression = q.reveal.match(/^(.+?)【/)?.[1] ?? "";
+  const forms = [...q.answer.split(FORM_SEPARATOR), ...expression.split(FORM_SEPARATOR)]
+    .map(normalize)
+    .filter((f) => f !== "");
+
+  return forms.some((f) => f === given || readingKey(f) === givenKey);
 }
 
 /**

@@ -147,6 +147,38 @@ describe("grading", () => {
     expect(checkAnswer(q, "ぜったいちがう")).toBe(false);
   });
 
+  test("production accepts romaji, for anyone typing without a Japanese IME", () => {
+    const item = items.find((i) => i.reading === "あし")!;
+    const q = buildQuestion(db, item, "production", false, mulberry(5));
+    expect(checkAnswer(q, "ashi")).toBe(true);
+    expect(checkAnswer(q, "ASHI")).toBe(true);
+    expect(checkAnswer(q, "ashe")).toBe(false);
+  });
+
+  test("production accepts any one of several written forms", () => {
+    // Entries list alternatives in one field ("足; 脚"); each must be accepted
+    // on its own, or the answer key is a string no learner would ever type.
+    const item = items.find((i) => /[;；/／、]/.test(i.expression))!;
+    const q = buildQuestion(db, item, "production", false, mulberry(7));
+    for (const form of item.expression.split(/[;；/／、]/).map((s) => s.trim())) {
+      expect({ form, ok: checkAnswer(q, form) }).toEqual({ form, ok: true });
+    }
+  });
+
+  test("an empty answer is wrong, not a match against an empty form", () => {
+    const item = items.find((i) => i.has_kanji === 1)!;
+    const q = buildQuestion(db, item, "production", false, mulberry(9));
+    expect(checkAnswer(q, "")).toBe(false);
+    expect(checkAnswer(q, "   ")).toBe(false);
+
+    // The dangerous case: readingKey() drops a leading ー, so a form that is
+    // nothing but a prolongation mark folds to "" and would match "" — i.e.
+    // submitting nothing would score correct. Filtering empty *forms* does not
+    // catch this, because the form is non-empty until it is folded.
+    const degenerate = { ...q, answer: "ー", reveal: "ー【ー】— x" };
+    expect(checkAnswer(degenerate, "")).toBe(false);
+  });
+
   test("normalize folds width and strips the ~ placeholder", () => {
     expect(normalize("～ＡＢ ")).toBe("ab");
   });

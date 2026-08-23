@@ -81,8 +81,11 @@ async function cmdNext() {
   const q = nextQuestion(db, { level: levelOpt(), mode: modeOpt() });
   if (!q) {
     const s = dueCount(db);
+    // The suggested value must be derived from the current limit, not a constant:
+    // a hardcoded hint tells you to *lower* the limit once you have raised it.
+    const limit = Number.parseInt(getSetting(db, "new_per_day", "5"), 10);
     const msg = s.unseen > 0
-      ? `Nothing due. Daily new-card limit (${getSetting(db, "new_per_day", "5")}) reached — come back tomorrow, or raise it: bun run cli set new_per_day 8`
+      ? `Nothing due. Daily new-card limit (${limit}) reached — come back tomorrow, or raise it: bun run cli set new_per_day ${limit + 4}`
       : "Nothing due and every card introduced. Come back later.";
     if (JSON_OUT) console.log(JSON.stringify({ question: null, reason: msg, ...s }));
     else console.log(C.yellow(msg));
