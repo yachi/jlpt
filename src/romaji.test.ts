@@ -121,3 +121,39 @@ describe("readingKey over the whole bank", () => {
     expect({ collisions }).toEqual({ collisions: [] });
   });
 });
+
+describe("kana input is not re-interpreted as romaji", () => {
+  /**
+   * The gemination rule turns a doubled letter into っ. Its guard only excluded
+   * ASCII vowels, so a doubled KANA — あ, つ, こ — matched it too, and
+   * readingKey() mangled the very readings it exists to compare against:
+   * ああ became っあ, こころ became っころ, パパ became っぱ. Typing the
+   * correct romaji could never match, so romaji input was impossible for 39
+   * words in the bank. Found live, answering 「Ah!」 with "aa".
+   */
+  test("a doubled kana is two morae, never a sokuon", () => {
+    for (const [input, want] of [
+      ["ああ", "ああ"], ["こころ", "こころ"], ["つつむ", "つつむ"],
+      ["たたみ", "たたみ"], ["ぱぱ", "ぱぱ"], ["すすむ", "すすむ"],
+    ] as const) {
+      expect({ input, got: readingKey(input) }).toEqual({ input, got: want });
+    }
+  });
+
+  test("romaji still geminates, and matches the kana it doubles", () => {
+    expect(readingKey("gakkou")).toBe(readingKey("がっこう"));
+    expect(readingKey("kitte")).toBe(readingKey("きって"));
+    expect(readingKey("matcha")).toBe(readingKey("まっちゃ"));
+    expect(readingKey("zasshi")).toBe(readingKey("ざっし"));
+  });
+
+  test("the answer that exposed it now round-trips", () => {
+    // "aa" -> ああ must equal the stored reading ああ.
+    expect(readingKey("aa")).toBe(readingKey("ああ"));
+    expect(readingKey("kokoro")).toBe(readingKey("こころ"));
+    expect(readingKey("tsutsumu")).toBe(readingKey("つつむ"));
+    // ...and a single あ must still NOT match ああ, or the long vowel stops
+    // being a distinction the card can test.
+    expect(readingKey("a")).not.toBe(readingKey("ああ"));
+  });
+});

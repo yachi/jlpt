@@ -49,6 +49,8 @@ const SYLLABLES: Record<string, string> = {
 
 const MAX_SYLLABLE = 3;
 const VOWELS = new Set(["a", "i", "u", "e", "o"]);
+/** Latin consonants only. Kana must never reach the romaji-shaped rules. */
+const ASCII_CONSONANT = /^[b-df-hj-np-tv-z]$/;
 
 /**
  * Convert ASCII Hepburn romaji to hiragana. Characters that are not part of a
@@ -76,7 +78,13 @@ export function romajiToKana(input: string): string {
 
     // Gemination: a doubled consonant is っ plus the syllable it doubles.
     // "n" is excluded above; "ch" doubles as "tch" (matcha -> まっちゃ).
-    if (!VOWELS.has(c) && c !== "n") {
+    //
+    // ASCII_CONSONANT, not "not a vowel": this function also runs on input that
+    // is ALREADY kana, and every kana is "not an ASCII vowel". Without the
+    // ASCII test, a doubled kana matched this rule and became a sokuon —
+    // ああ -> っあ, こころ -> っころ, パパ -> っぱ — mangling 39 of the bank's
+    // readings and making romaji input impossible for every one of them.
+    if (ASCII_CONSONANT.test(c) && c !== "n") {
       if (s[i + 1] === c) { out += "っ"; i += 1; continue; }
       if (c === "t" && s[i + 1] === "c" && s[i + 2] === "h") { out += "っ"; i += 1; continue; }
     }
