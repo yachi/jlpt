@@ -1,0 +1,5 @@
+{
+  "note": "Identity of the item bank that data/sentences.json was built against. sha256 over id|level|expression|reading for every item, ordered by id. Derived from a fresh seed of data/n5.csv + data/n4.csv, and only valid because src/sentences.test.ts (56 hand-verified pairs) independently confirms the corpus maps correctly against that same seed.",
+  "items": 1384,
+  "fingerprint": "a5252316ea5283a11d1f3c3afbf099b6101f4b622417d78992e3a3b75f2af303"
+}

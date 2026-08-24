@@ -1,6 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { ROOT, MODES } from "./db";
+import { ROOT, MODES, getSetting, setSetting } from "./db";
+
+/** settings key holding the bank identity the loaded sentence links belong to. */
+export const BANK_FINGERPRINT_KEY = "bank_fingerprint";
 
 export interface Item {
   id: number;
@@ -42,7 +45,9 @@ export function parseCsv(text: string): string[][] {
  * tanos.co.uk lists, which reconstruct the withdrawn 2004 JLPT 出題基準.
  * These lists are UNOFFICIAL: JLPT has published no syllabus since 2010.
  */
-export async function seed(db: Database, now = Date.now()): Promise<{ items: number; cards: number }> {
+export async function seed(
+  db: Database, now = Date.now(),
+): Promise<{ items: number; cards: number; droppedSentences: number }> {
   const insItem = db.query(
     `INSERT INTO items (level, expression, reading, meaning, has_kanji) VALUES (?,?,?,?,?)
      ON CONFLICT(level, expression, reading) DO NOTHING`,
@@ -84,7 +89,44 @@ export async function seed(db: Database, now = Date.now()): Promise<{ items: num
   cardTx();
 
   const cards = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM cards").get()!.n;
-  return { items: items.length, cards };
+
+  // If the bank's identity changed, every sentence_items row now names a
+  // DIFFERENT word than the corpus meant. Those links cannot be repaired --
+  // only rebuilt -- and leaving them is worse than having none: the learner
+  // would be asked the meaning of a word that is not in the audio. Drop them
+  // and say so; `cli import-sentences` puts them back.
+  const fingerprint = bankFingerprint(db);
+  let droppedSentences = 0;
+  if (getSetting(db, BANK_FINGERPRINT_KEY, "") !== fingerprint) {
+    droppedSentences = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n;
+    if (droppedSentences > 0) db.exec("DELETE FROM sentence_items; DELETE FROM sentences;");
+    setSetting(db, BANK_FINGERPRINT_KEY, fingerprint);
+  }
+
+  return { items: items.length, cards, droppedSentences };
+}
+
+/**
+ * A hash of the bank's IDENTITY: which id names which word.
+ *
+ * data/sentences.json keys every word by item id, and ids are assigned by the
+ * INSERT order in seed(). Insert the same CSVs in a different order -- or seed
+ * once, add a CSV row, and seed again, where ON CONFLICT DO NOTHING gives the
+ * late arrival an id at the END -- and every id after that point names a
+ * different word. Measured on a bank re-seeded after one row was inserted at
+ * CSV position 200: 1184 of 1384 ids resolved to a different word, and the
+ * corpus still imported cleanly because every id still EXISTED.
+ *
+ * `meaning` is deliberately excluded: editing a gloss does not change which
+ * word an id names, and should not invalidate a corpus.
+ */
+export function bankFingerprint(db: Database): string {
+  const h = new Bun.CryptoHasher("sha256");
+  for (const r of db.query<{ id: number; level: string; expression: string; reading: string }, []>(
+    "SELECT id, level, expression, reading FROM items ORDER BY id").all()) {
+    h.update(`${r.id}|${r.level}|${r.expression}|${r.reading}\n`);
+  }
+  return h.digest("hex");
 }
 
 /**

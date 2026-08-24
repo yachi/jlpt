@@ -18,7 +18,8 @@
  */
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { ROOT, getSetting } from "./db";
+import { ROOT, getSetting, setSetting } from "./db";
+import { bankFingerprint, BANK_FINGERPRINT_KEY } from "./bank";
 
 /** Off by default: the corpus only covers ~half of listening cards by day 30. */
 export const SENTENCE_SETTING = "sentence_listening";
@@ -157,12 +158,35 @@ export async function importSentences(
       .filter((n) => Number.isInteger(n)),
   );
 
-  // The corpus keys words by bank item id, which is assigned by seed() in CSV
-  // order. If the two ever disagree the mapping is not merely incomplete, it is
-  // silently WRONG, so refuse to import rather than serve mismatched sentences.
-  // (Identity, not just existence, is guarded by src/sentences.test.ts.)
+  // IDENTITY, not existence.
+  //
+  // The corpus keys words by bank item id, and seed() assigns ids in INSERT
+  // order. A user who seeded before a CSV row was added and re-seeded after
+  // gets that word an id at the END, shifting every later word by one — and an
+  // existence check cannot see it, because all 1384 ids still exist. Measured
+  // on exactly that bank: 1184/1384 ids named a different word, 43,457
+  // sentences imported without a murmur, and 3,828 of the first 4,000 were
+  // linked to a word that does not occur in them —「何してるの？」answered by
+  // 座る【すわる】. Compare the fingerprint of the whole bank instead.
+  const bank = bankFingerprint(db);
+  const items = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM items").get()!.n;
+  if (items === 0) throw new Error("No items in the bank — run `bun run seed` first.");
+  const expected = (await Bun.file(join(ROOT, "data", "sentences-bank.json")).json()) as
+    { items: number; fingerprint: string };
+  if (bank !== expected.fingerprint) {
+    throw new Error(
+      `This database's item bank is not the one data/sentences.json was built against.\n` +
+      `  expected ${expected.fingerprint.slice(0, 16)}… over ${expected.items} items\n` +
+      `  this db  ${bank.slice(0, 16)}… over ${items} items\n` +
+      "Every sentence links words by item id, so importing would ask you the meaning of\n" +
+      "words that are not in the audio. Ids are assigned by INSERT order, so this happens\n" +
+      "when the CSVs changed between seeds. Rebuild the bank from scratch (a fresh\n" +
+      "database, then `bun run seed`), or rebuild the corpus with tools/build_sentences.py.");
+  }
+
+  // Existence is now implied by the fingerprint, but a corpus row naming an id
+  // outside the bank would still be a corpus bug rather than a bank bug.
   const known = new Set(db.query<{ id: number }, []>("SELECT id FROM items").all().map((r) => r.id));
-  if (known.size === 0) throw new Error("No items in the bank — run `bun run seed` first.");
   for (const s of corpus) {
     for (const i of [...s.items, ...s.ambiguous]) {
       if (!known.has(i)) {
@@ -192,6 +216,9 @@ export async function importSentences(
       sentences++; links += n;
     }
     recomputeUnheard(db);
+    // Stamp the bank these links belong to, so a later seed() that changes the
+    // bank identity knows to drop them instead of serving them.
+    setSetting(db, BANK_FINGERPRINT_KEY, bank);
   })();
 
   return { sentences, links, blacklisted };

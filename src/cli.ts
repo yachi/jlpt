@@ -67,6 +67,13 @@ async function cmdSeed() {
   const counts = db.query<{ level: string; n: number }, []>(
     "SELECT level, COUNT(*) AS n FROM items GROUP BY level").all();
   console.log(`Seeded ${r.items} items -> ${r.cards} scheduled cards.`);
+  if (r.droppedSentences > 0) {
+    // Silence here would leave the learner being asked about words that are not
+    // in the audio — see the fingerprint comment in bank.ts.
+    console.log(C.yellow(
+      `  Dropped ${r.droppedSentences} sentence links: the item bank's identity changed, so they\n` +
+      "  named different words than the corpus meant. Restore them with: bun run cli import-sentences"));
+  }
   for (const c of counts) console.log(`  ${c.level}: ${c.n} words`);
   console.log(C.dim("\nSource: open-anki-jlpt-decks (MIT), derived from tanos.co.uk lists,"));
   console.log(C.dim("which reconstruct the WITHDRAWN 2004 JLPT 出題基準. Unofficial by construction —"));

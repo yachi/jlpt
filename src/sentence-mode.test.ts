@@ -3,8 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, setSetting, type Mode } from "./db";
-import { seed, shortMeaning, distractors, type Item } from "./bank";
+import { openDb, setSetting, ROOT, type Mode } from "./db";
+import { seed, shortMeaning, distractors, parseCsv, type Item } from "./bank";
 import { buildQuestion, grade, nextQuestion, slowThresholdFor, ratingFor, SLOW_MS } from "./quiz";
 import {
   importSentences, pickSentence, recomputeUnheard, unheardDrift, sentenceCoverage,
@@ -54,6 +54,79 @@ describe("reviews.sentence_id migration", () => {
     expect(again.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM reviews").get()!.n).toBe(1);
     again.close();
   });
+});
+
+describe("the bank identity guard", () => {
+  const KANJI_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+
+  /** seed()'s exact item insert, so id assignment is faithful. */
+  function insertItems(db: Database, rows: { level: string; cells: string[] }[]) {
+    const ins = db.query(
+      `INSERT INTO items (level, expression, reading, meaning, has_kanji) VALUES (?,?,?,?,?)
+       ON CONFLICT(level, expression, reading) DO NOTHING`);
+    db.transaction(() => {
+      for (const { level, cells } of rows) {
+        ins.run(level, cells[0]!, cells[1]!, cells[2]!, KANJI_RE.test(cells[0]!) ? 1 : 0);
+      }
+    })();
+  }
+
+  test("a bank whose ids shifted is refused, even though every id exists", async () => {
+    // The scenario: seeded once when n5.csv was one row shorter, then re-seeded
+    // after the row came back. ON CONFLICT DO NOTHING gives the late arrival an
+    // id at the END, so every word after it keeps an id that now names its
+    // neighbour. Measured on the real CSVs: 1184 of 1384 ids move.
+    const all: { level: string; cells: string[] }[] = [];
+    for (const level of ["N5", "N4"] as const) {
+      const rows = parseCsv(await Bun.file(join(ROOT, "data", `${level.toLowerCase()}.csv`)).text());
+      for (const cells of rows.slice(1)) {
+        if (cells.length >= 3 && cells[0] && cells[1] && cells[2]) all.push({ level, cells });
+      }
+    }
+    const skewed = openDb(":memory:");
+    insertItems(skewed, all.filter((_, i) => i !== 200));  // the old CSV
+    insertItems(skewed, all);                              // the upgrade
+
+    const fresh = openDb(":memory:");
+    await seed(fresh);
+    // Precondition: the ids all still EXIST, which is why existence is not a guard.
+    const freshIds = fresh.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM items").get()!.n;
+    expect(skewed.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM items").get()!.n).toBe(freshIds);
+    const label = (db: Database) => new Map(db.query<
+      { id: number; expression: string }, []>("SELECT id, expression FROM items").all()
+      .map((i) => [i.id, i.expression]));
+    const a = label(fresh), b = label(skewed);
+    const moved = [...a].filter(([id, e]) => b.get(id) !== e).length;
+    expect(moved).toBeGreaterThan(1000);
+
+    await expect(importSentences(skewed)).rejects.toThrow(/not the one data\/sentences\.json was built against/);
+    expect(skewed.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n).toBe(0);
+  }, 60_000);
+
+  test("re-seeding into a changed bank drops the links instead of serving them", async () => {
+    const db = openDb(":memory:");
+    await seed(db);
+    await importSentences(db);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n).toBeGreaterThan(0);
+
+    // Same ids, different word behind one of them.
+    db.query("UPDATE items SET expression = ?, reading = ? WHERE id = 1").run("ZZZ", "ずずず");
+    const again = await seed(db);
+    expect(again.droppedSentences).toBeGreaterThan(0);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n).toBe(0);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentence_items").get()!.n).toBe(0);
+  }, 60_000);
+
+  test("an unchanged bank keeps its links across a re-seed", async () => {
+    // The guard must not fire on the ordinary case, or every seed wipes the corpus.
+    const db = openDb(":memory:");
+    await seed(db);
+    await importSentences(db);
+    const before = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n;
+    const again = await seed(db);
+    expect(again.droppedSentences).toBe(0);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n).toBe(before);
+  }, 60_000);
 });
 
 describe("sentence stimulus", () => {
