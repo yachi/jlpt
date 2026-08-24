@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
-import { distractors, shortMeaning, type Item } from "./bank";
+import { distractors, shortMeaning, productionPrompt, type Item } from "./bank";
 import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
 import { readingKey } from "./romaji";
 import { pickSentence, sentencesEnabled, decrementUnheardFor, type SentenceStimulus } from "./sentences";
@@ -99,6 +99,12 @@ export interface Question {
   answerIndex: number;
   /** Correct answer as text (for typed grading + feedback). */
   answer: string;
+  /**
+   * Other readings that are equally correct, when the prompt genuinely cannot
+   * single one out — あした and あす are both "tomorrow". Empty for every card
+   * whose prompt is unambiguous.
+   */
+  alsoAccept?: string[];
   /** Shown after answering. */
   reveal: string;
   isNew: boolean;
@@ -285,8 +291,12 @@ export function buildQuestion(
         choices, answerIndex, answer: meaning };
     }
     case "production": {
-      return { ...base, instruction: "Type the Japanese reading (kana).", prompt: meaning,
-        choices: [], answerIndex: -1, answer: item.reading };
+      // NOT `meaning`: a short gloss does not determine a reading — see
+      // productionPrompt() for the 11.6% of cards that made unanswerable.
+      const { prompt, alsoAccept } = productionPrompt(db, item);
+      return { ...base, instruction: "Type the Japanese reading (kana).", prompt,
+        choices: [], answerIndex: -1, answer: item.reading,
+        ...(alsoAccept.length ? { alsoAccept } : {}) };
     }
   }
 }
@@ -347,9 +357,13 @@ export function checkAnswer(q: Question, response: string | number): boolean {
   // Accept the kana reading or any written form — an IME user may type either,
   // and readingKey() additionally accepts romaji for anyone without an IME.
   const expression = q.reveal.match(/^(.+?)【/)?.[1] ?? "";
-  const forms = [...q.answer.split(FORM_SEPARATOR), ...expression.split(FORM_SEPARATOR)]
-    .map(normalize)
-    .filter((f) => f !== "");
+  const forms = [
+    ...q.answer.split(FORM_SEPARATOR),
+    ...expression.split(FORM_SEPARATOR),
+    // A prompt naming a synonym set has more than one right answer; grading
+    // only the item we happened to schedule would fail a correct learner.
+    ...(q.alsoAccept ?? []).flatMap((r) => r.split(FORM_SEPARATOR)),
+  ].map(normalize).filter((f) => f !== "");
 
   return forms.some((f) => f === given || readingKey(f) === givenKey);
 }

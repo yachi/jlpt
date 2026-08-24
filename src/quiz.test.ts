@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import type { Database } from "bun:sqlite";
 import { mkdtempSync, writeFileSync, existsSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
-import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
+import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, productionPrompt, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
   parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus, speakableReading } from "./quiz";
 import { synthesize, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
@@ -616,5 +617,70 @@ describe("TTS cache safety", () => {
     const rng = mulberry(11);
     const seen = new Set(Array.from({ length: 400 }, () => pickMacVoice(rng)));
     expect(seen.size).toBe(MACOS_JA_VOICES.length);
+  });
+});
+
+describe("a production prompt must determine its answer", () => {
+  let db: Database;
+  let items: Item[];
+  beforeAll(async () => { db = openDb(":memory:"); await seed(db); items = db.query<Item, []>("SELECT * FROM items").all(); });
+  const find = (expression: string) => items.find((i) => i.expression === expression)!;
+
+  test("no production card in the bank is unanswerable", () => {
+    // The defect: the prompt was the FIRST gloss only, so 76 prompts named more
+    // than one entry and 161 of 1384 cards (11.6%) could not be answered —
+    // "red" is both 赤【あか】and 赤い【あかい】. Found live, marking a correct
+    // answer wrong. Fairness here means: every entry sharing a prompt is either
+    // separated by that prompt, or accepted by it.
+    const byPrompt = new Map<string, Item[]>();
+    for (const i of items) {
+      const { prompt } = productionPrompt(db, i);
+      const g = byPrompt.get(prompt);
+      if (g) g.push(i); else byPrompt.set(prompt, [i]);
+    }
+    const unfair: string[] = [];
+    for (const [prompt, group] of byPrompt) {
+      if (group.length === 1) continue;
+      for (const i of group) {
+        const q = buildQuestion(db, i, "production", false, mulberry(i.id));
+        for (const other of group) {
+          if (other.id !== i.id && !checkAnswer(q, other.reading)) {
+            unfair.push(`"${prompt}" ${i.expression}【${i.reading}】 rejects ${other.reading}`);
+          }
+        }
+      }
+    }
+    expect(unfair.slice(0, 5)).toEqual([]);
+  });
+
+  test("a noun and the い-adjective built on it are told apart, not merged", () => {
+    // Accepting both readings would be "fair" and would teach nothing, so this
+    // pair must be separated by the prompt rather than papered over.
+    for (const [noun, adjective] of [["赤", "赤い"], ["青", "青い"], ["黄色", "黄色い"]] as const) {
+      const n = productionPrompt(db, find(noun));
+      const a = productionPrompt(db, find(adjective));
+      expect({ noun, n: n.prompt, a: a.prompt }).toEqual(
+        { noun, n: `${find(noun).meaning} (noun)`, a: `${find(adjective).meaning} (い-adjective)` });
+      expect({ noun, accepts: [...n.alsoAccept, ...a.alsoAccept] }).toEqual({ noun, accepts: [] });
+      // ...and the adjective's card must still reject the noun's reading.
+      expect(checkAnswer(buildQuestion(db, find(adjective), "production", false, mulberry(1)),
+        find(noun).reading)).toBe(false);
+    }
+  });
+
+  test("a genuine synonym set accepts every member", () => {
+    // No prompt can separate あした from あす; both are simply right.
+    const q = buildQuestion(db, find("明日"), "production", false, mulberry(1));
+    expect(checkAnswer(q, "あした")).toBe(true);
+    expect(checkAnswer(q, "あす")).toBe(true);
+    expect(checkAnswer(q, "きょう")).toBe(false);
+  });
+
+  test("an unambiguous prompt stays short and accepts nothing extra", () => {
+    // The disambiguation must not fire on the ordinary case, or every prompt
+    // turns into the full comma-joined gloss list.
+    const plain = items.filter((i) => productionPrompt(db, i).alsoAccept.length === 0
+      && productionPrompt(db, i).prompt === shortMeaning(i.meaning));
+    expect(plain.length).toBeGreaterThan(1000);
   });
 });

@@ -173,6 +173,51 @@ export function shortMeaning(meaning: string): string {
 }
 
 /**
+ * The prompt for a production card, and the readings it must also accept.
+ *
+ * A production card shows a gloss and asks for the reading, so the gloss has to
+ * determine the answer. `shortMeaning` alone does not: 76 short glosses name
+ * more than one bank entry, making 161 of 1384 production cards (11.6%)
+ * unanswerable — "red" is both 赤【あか】and 赤い【あかい】, and no amount of
+ * knowing Japanese picks one. Found live, marking a correct answer wrong.
+ *
+ * Three layers, each doing only what it is good at:
+ *   1. the full meaning, when the short one is ambiguous  — resolves 58 of 76
+ *   2. an い-adjective tag, derived structurally (same expression and reading
+ *      as another entry plus い) — resolves the noun/adjective pairs, which no
+ *      gloss can separate because both really do mean "red"
+ *   3. whatever is still tied is a genuine synonym set (あした/あす,
+ *      在る/有る, あっち/そちら/そっち): accept every member's reading, since
+ *      the question as posed has more than one correct answer.
+ *
+ * Layer 3 is the guarantee; 1 and 2 exist so the card still teaches something.
+ */
+export function productionPrompt(
+  db: Database, item: Item,
+): { prompt: string; alsoAccept: string[] } {
+  const short = shortMeaning(item.meaning);
+  const rivals = db
+    .query<Item, [number]>("SELECT * FROM items WHERE id != ?").all(item.id)
+    .filter((c) => shortMeaning(c.meaning).toLowerCase() === short.toLowerCase());
+  if (rivals.length === 0) return { prompt: short, alsoAccept: [] };
+
+  const stillTied = rivals.filter((c) => c.meaning.toLowerCase() === item.meaning.toLowerCase());
+  if (stillTied.length === 0) return { prompt: item.meaning, alsoAccept: [] };
+
+  // An い-adjective and the noun it is built on: 赤い/赤, 青い/青, 黄色い/黄色.
+  const adjectiveOf = (a: Item, b: Item) =>
+    a.expression === `${b.expression}い` && a.reading === `${b.reading}い`;
+  const isAdjective = stillTied.some((c) => adjectiveOf(item, c));
+  const isBaseNoun = stillTied.some((c) => adjectiveOf(c, item));
+  const remaining = stillTied.filter((c) => !adjectiveOf(item, c) && !adjectiveOf(c, item));
+
+  const prompt = isAdjective ? `${item.meaning} (い-adjective)`
+    : isBaseNoun ? `${item.meaning} (noun)`
+    : item.meaning;
+  return { prompt, alsoAccept: remaining.map((c) => c.reading) };
+}
+
+/**
  * Pick `n` distractors for an item. Distractors are drawn from the same JLPT
  * level so difficulty stays calibrated, and (for readings) biased toward the
  * same length and first mora so the question can't be solved by shape alone.
