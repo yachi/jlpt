@@ -22,6 +22,11 @@ export function openDb(path = DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+  // Wait for a writer instead of failing. `import-sentences` holds the write
+  // lock for ~1s, and the JSON `next`/`answer` flow is driven by a separate
+  // process, so a concurrent grade() would otherwise throw "database is locked"
+  // at the user — measured: 14 of 15 grades failed during one import.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS items (
       id          INTEGER PRIMARY KEY,

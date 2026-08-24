@@ -418,11 +418,12 @@ export function grade(
   // the third statement; if it were to miss while the card update landed, the
   // drift would be permanent and silent — the sentence would simply stop being
   // offered, and nothing would ever report it.
+  let cardWritten = 0;
   db.transaction(() => {
-    db.query(
+    cardWritten = db.query(
       `UPDATE cards SET stability=?, difficulty=?, state=?, step=?, due=?, last_review=?, introduced=1
         WHERE item_id=? AND mode=?`,
-    ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview, q.itemId, q.mode);
+    ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview, q.itemId, q.mode).changes;
 
     db.query(
       "INSERT INTO reviews (item_id, mode, rating, correct, ts, elapsed_ms, sentence_id) VALUES (?,?,?,?,?,?,?)",
@@ -432,7 +433,16 @@ export function grade(
     // while the card is still walking the learning steps — hooking there would
     // admit the words the learner knows LEAST well first. Monotone: a lapse
     // goes review -> relearning, never back to learning (fsrs.ts:221-223).
-    if (q.mode === "listening" && before.state === "learning" && after.state === "review") {
+    //
+    // `cardWritten` is not belt-and-braces. When the cards row does not exist
+    // the UPDATE matches nothing, but `before` falls back to newCard() —
+    // state 'learning' — so the predicate fires and the counter falls for a
+    // word that never became known by ear. Measured on a deleted row: 46
+    // sentences decremented, 0 card rows written, 46 sentences permanently
+    // adrift. A question can outlive its card: `pending` is stored as JSON in
+    // settings and answered later, and items cascade-delete their cards.
+    if (cardWritten > 0
+        && q.mode === "listening" && before.state === "learning" && after.state === "review") {
       decrementUnheardFor(db, q.itemId);
     }
   })();

@@ -416,6 +416,37 @@ describe("n_unheard is maintained at graduation", () => {
       "SELECT COUNT(*) AS n FROM reviews WHERE elapsed_ms = 66613").get()!.n).toBe(0);
   });
 
+  test("a question that outlives its card decrements nothing", async () => {
+    // `pending` is stored as JSON in settings and answered later, and items
+    // cascade-delete their cards — so a Question can reach grade() after its
+    // card is gone. The UPDATE then matches nothing, but `before` falls back to
+    // newCard() (state 'learning'), so the graduation predicate fires anyway.
+    // Measured before the fix, on the real corpus: 46 sentences decremented,
+    // 0 card rows written, 46 sentences permanently adrift.
+    const fresh = openDb(":memory:");
+    await seed(fresh);
+    await importSentences(fresh);
+    const ghost = fresh.query<Item, []>(`
+      SELECT i.* FROM items i
+        JOIN (SELECT item_id, COUNT(*) c FROM sentence_items GROUP BY 1 ORDER BY c DESC LIMIT 1) t
+          ON t.item_id = i.id`).get()!;
+    const linked = fresh.query<{ n: number }, [number]>(
+      "SELECT COUNT(*) AS n FROM sentence_items WHERE item_id = ?").get(ghost.id)!.n;
+
+    const q = buildQuestion(fresh, ghost, "listening", true, mulberry(1));
+    fresh.query("DELETE FROM cards WHERE item_id = ? AND mode = 'listening'").run(ghost.id);
+
+    const sum = () => fresh.query<{ n: number }, []>(
+      "SELECT COALESCE(SUM(n_unheard),0) AS n FROM sentences").get()!.n;
+    const before = sum();
+    // easy -> rating 4 -> learning graduates straight to review in one step.
+    grade(fresh, q, q.answerIndex, 500, { now: 1_500_000_000, rng: mulberry(8), easy: true });
+
+    expect({ linked: linked > 100, moved: before - sum() }).toEqual({ linked: true, moved: 0 });
+    expect(unheardDrift(fresh)).toEqual([]);
+    fresh.close();
+  }, 60_000);
+
   test("the incremental counter agrees with a full recompute", () => {
     expect(unheardDrift(db)).toEqual([]);
   });
