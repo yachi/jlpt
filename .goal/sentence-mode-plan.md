@@ -278,12 +278,38 @@ had no test at all.
 
 | Layer | Status |
 |---|---|
-| 1 unit | 21 sentence tests, 122 total |
-| 2 integration | 300+ questions through the real scheduler and the real corpus, zero counter drift |
-| 3 mutation | 9/9 guards kill their mutant |
-| 4 property | not done — eligibility is a candidate |
-| 7 adversarial | the plan's three review rounds; not re-run against the built code |
+| 1 unit | 25 sentence tests, 126 total |
+| 2 integration | 21,722 sentence stimuli served with drift checked after EVERY grade: 0 drifted |
+| 3 mutation | 14/14 guards kill their mutant |
+| 4 property | exhaustive, not sampled: all 3,600 scheduler states scanned (below) |
+| 6 performance | `nextQuestion(listening)` 0.74 ms/call end to end, all hot queries on `idx_sentence_items_item` |
+| 7 adversarial | **run** — three findings, all fixed (`04f5306`, `2b90001`) |
 | 8 invariants | `unheardDrift()` in code, exposed by `--check` |
+
+### What the adversarial review found
+
+Three real defects, none visible in any aggregate:
+
+1. **Existence is not identity.** The import checked that every referenced item
+   id existed. Ids are assigned by INSERT order, so a bank re-seeded after a CSV
+   row was added had 1184 of 1384 ids naming a different word — and imported
+   43,457 sentences without an error.「何してるの？」answered by 座る【すわる】.
+   Fixed with a fingerprint over the bank's natural keys, closing both the
+   import and the re-seed direction.
+2. **The transaction was not the fix I thought it was.** `grade()` decremented
+   the counter for a card row that does not exist: the UPDATE matched nothing,
+   `before` fell back to `newCard()` (state `learning`), and the predicate fired.
+   46 sentences adrift, permanently. A transaction guarantees the writes agree
+   with each other, never that any of them happened.
+3. **`database is locked`** during the ~1s import, 14 of 15 concurrent grades.
+   SQLite's default busy timeout is 0. Now 5000 ms.
+
+Three things were attacked and held, each by measurement rather than argument:
+`learning -> review` is the ONLY transition that flips known-by-ear (exhaustive
+scan of 3,600 scheduler states, 0 predicate mismatches, no known -> unknown
+regression, so monotonicity is structural); the hot path does not repeat the 29x
+correlated-subquery regression; and the SQL string interpolation of item ids is
+unreachable for non-numeric input because the import rejects it first.
 
 ## Landed ahead of this plan
 
