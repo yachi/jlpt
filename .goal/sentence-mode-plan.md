@@ -1,288 +1,255 @@
 # Plan: sentences in listening practice
 
-Revision 3. Revision 1 proposed a fifth scheduled mode; adversarial review
-found three fatal flaws in that shape, and a cheaper design that dissolves all
-three rather than fixing them. Revision 2 adopted that design; a second review
-found one internal contradiction in it and three correctness gaps. This is the
-result. It is considered buildable.
+Revision 4. Phases 0 and 1 are done and are recorded here as results, not
+intentions. What remains is Phase 2, the runtime.
+
+| Rev | What changed |
+|-----|--------------|
+| 1 | A fifth scheduled mode. Adversarial review found three fatals. |
+| 2 | Reframed: better stimulus for the existing listening card. |
+| 3 | Second review: hook fired at the wrong event, three correctness gaps. |
+| 4 | Phases 0-1 executed. The justification was wrong and is replaced. |
 
 ## 0. Two reframes
 
-**Reframe 1 — do not generate Japanese, select it.**
-Template-generated sentences are grammatical but unnatural, and training
-listening on unnatural prosody teaches the wrong target. Use the established
-i+1 / 1T method: serve a real sentence in which exactly one word is the review
-target and every other word is already known.
+**Do not generate Japanese, select it.** A template generator produces
+grammatical but unnatural Japanese, and training listening on unnatural
+prosody teaches the wrong target.
 
-Honest qualification: offline LLM generation, constrained to the learner's exact
-vocabulary and spot-checked by a native speaker, is a legitimate Plan B, not a
-strawman. JLPT listening material is itself scripted, not corpus-mined, and
-Tatoeba's user-submitted sentences are of uneven quality. Corpus goes first
-because it is cheaper and licence-clean — not because generation is illegitimate.
-If the Phase 0 gate fails, generation is the documented fallback.
+Offline LLM generation constrained to the learner's vocabulary, native-checked
+and checked in as static data, remains a legitimate Plan B. Corpus went first
+because it is cheaper and licence-clean, not because generation is
+illegitimate. The gate passed, so Plan B stays unused.
 
-**Reframe 2 — this is not a new mode. It is a better stimulus for an existing one.**
-The measured weakness is listening. A `listening` card today plays one word
-(`quiz.ts:226-229`, `audioText: item.expression`). When an eligible sentence
-exists for that word, play the *sentence* instead and ask the same question:
-what does the target word mean?
+**This is not a new mode. It is a better stimulus for an existing one.** A
+`listening` card plays one word (`quiz.ts:231`). When an eligible sentence
+exists for that word, play the sentence and ask the same question. Same card,
+same FSRS state, same grading, same mode. That dissolved every fatal revision
+1 had — no orphan cards to jam the queue, no `Record<Mode>` churn, no weight
+migration, no dilution of the shared new-card limit.
 
-Same card, same FSRS state, same grading, same mode. What this avoids:
+## 0b. Why this works — corrected
 
-| Revision 1 problem | Why it disappears |
-|---|---|
-| A due `sentence` card with no eligible sentence is re-picked forever (`quiz.ts:145-150` orders by `due ASC`; `grade` keys by `q.mode`, `quiz.ts:293-301`) | No card can lack a stimulus — the word is the fallback, on the same card |
-| Seeding ~1,384 sentence cards that are ineligible for months (`bank.ts` loops `MODES`) | No new cards |
-| `Record<Mode, …>` exhaustiveness | No new mode |
-| Stored `mode_weights` = `listening:45,reading:30,production:15,meaning:10` silently gives a new mode weight 0 (`quiz.ts:37`) | No retune, no migration |
-| A fifth mode eats the shared 12/day new-card limit, slowing the vocabulary growth that sentence eligibility depends on | No dilution |
+Revisions 1-3 justified the design by Krashen's i+1. **That justification is
+wrong and has been removed.** The input hypothesis is criticised for lacking
+empirical content and falsifiability, and studies of input pitched exactly at
+i+1 give mixed results ([Lai, TPLS 9/11](https://www.academypublication.com/issues2/tpls/vol09/11/13.pdf);
+[Frontiers in Psychology, 2025](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2025.1636777/full)).
+Calling it "the established method" was overclaiming.
 
-Cost: ~10% of revision 1's surface area. And it measures its own premise —
-logging how often a sentence was available IS the corpus-adequacy statistic.
+The design does not need it. It rests on **measurement validity**: a listening
+question is only valid if failure is attributable to the target word rather
+than to vocabulary the learner never studied.
 
-Promote to a separate scheduled mode later only if the data shows
-context-listening and word-listening diverge enough to need separate FSRS state.
+van Zeeland & Schmitt (2013), *Applied Linguistics* 34(4), 457-479
+([doi:10.1093/applin/ams074](https://academic.oup.com/applij/article-abstract/34/4/457/199564))
+put the lexical coverage threshold for adequate listening comprehension near
+95%, with comprehension rising 7.35 / 7.65 / 8.22 / 9.62 out of 10 at 90 / 95 /
+98 / 100% coverage. This design uses 100% coverage, above the optimum — right
+for attribution, and openly easier than the exam.
+
+Honest limits: those thresholds were measured on continuous text, not on
+four-word sentences, so the principle transfers but the unit does not.
 
 ## 1. Goals / non-goals
 
 Goals
-- When a `listening` card comes due and an i+1 sentence exists for its item,
-  the stimulus is that sentence.
-- "Known" for this purpose means **known by ear**, not merely introduced.
-- Sentences are real, externally sourced, licence-clean, checked in.
+- When a `listening` card is due and an i+1 sentence exists for its item, the
+  stimulus is that sentence.
+- "Known" means known **by ear**, not merely introduced.
+- Sentences are real, externally sourced, licence-clean, checked in. **Done.**
 - `stats` reports sentence availability, so the premise stays measured.
 
 Non-goals
-- A fifth mode. Deferred, deliberately, until data justifies it.
-- Cloze / fill-in-the-blank. Revision 1 had the target word audible in the
-  audio while blanked in the text — the audio gave away the answer. A real
-  cloze is a *reading* task and belongs to `reading`, not here.
-- MC comprehension over whole-sentence English translations. Revision 1 claimed
-  this reused `distractors()` (`bank.ts:138`); it does not — it needs new
-  selection over sentence translations, and random Tatoeba translations are so
-  unrelated that one content word solves the question. Dropped.
-- Multi-speaker dialogue (課題理解 / 即時応答). Separate project.
+- **Training the learner to cope with unknown words.** At 100% coverage,
+  comprehension is near ceiling. This trains recognising known words in
+  connected speech — one rung, not the destination. The exam is dialogue, with
+  distraction and coverage well under 100%.
+- A fifth mode. Deferred until data shows word- and sentence-listening
+  retention diverge.
+- Cloze. Revision 1's version left the target audible while blanking it in
+  text. A real cloze is a reading task and belongs to `reading`.
+- MC over whole-sentence translations. Random Tatoeba translations are so
+  unrelated that one content word solves the item.
+- Multi-speaker dialogue. Separate project.
 
-## 2. The known-by-ear predicate
+## 2. Known by ear
 
-The single most important correctness decision, and revision 1 got it wrong.
+A context word counts as known only if its `listening` card has **graduated
+initial learning** — `introduced = 1 AND state <> 'learning'`.
 
-Revision 1: a word counts as known if any mode of it was introduced. That
-admits words the learner has only ever *seen*. Under `skip_meaning_for_kanji`
-— enabled for this user — that is self-contradictory: the whole premise of that
-feature is that recognising 秋 and hearing あき are different skills.
+`relearning` counts as known: the word was parseable once, and excluding
+lapsed words would churn hundreds of counter rows per lapse of a common word.
 
-Rule: a context word counts as known only if its **`listening` card has
-graduated initial learning** — `introduced = 1 AND state != 'learning'`.
-Sentences consolidate words you can already parse from audio; anything looser
-destroys the one property the feature exists to provide.
+Revision 2 stated this rule and then maintained it at the wrong event. See §4.
 
-`relearning` counts as known: the word was parseable once, and excluding lapsed
-words would churn hundreds of counter rows every time a common word lapses.
+## 3. Corpus — DONE
 
-Revision 2 said this and then maintained it at the wrong event — see §4.
+`tools/build_sentences.py`, a PEP 723 uv script mirroring
+`tools/gen-fsrs-fixture.py`: run the real analyser offline, check in the
+result, keep the runtime dependency-free.
 
-## 3. Data pipeline
+`data/sentences.json` — 43,478 sentences, median 3 content words, 83.2% of
+bank words targetable, 61.7% containing a kana homophone (context-only).
 
-Tatoeba jpn-eng, CC BY 2.0 FR. `tools/build-sentences.py`, a PEP 723 uv script,
-mirroring `tools/gen-fsrs-fixture.py`: run the real library offline, check in
-the result, keep runtime dependency-free.
+`data/CREDITS.md` — 633 named contributors. CC BY 2.0 FR requires credit to the
+creator; a source link alone does not satisfy it, contrary to what revision 3
+assumed. Sentence ids are kept and resolve to the originals.
 
-Unresolved before building — each must be decided, not discovered:
-- **Function words.** `は/が/を/です/ます/た`, counters, numerals, proper nouns
-  are not bank items. Without a closed-class allowlist almost no sentence
-  passes; with a loose one the i+1 guarantee quietly weakens. The allowlist is
-  a design artefact and must be checked in and reviewed, not inferred.
-- **Lemma → item mapping.** `食べました` → `食べる`; `勉強する` vs analyser
-  `勉強`+`する`; multi-form entries (`足; 脚`); `～` placeholders (`～か月`);
-  homograph collisions.
-- **Acceptance test.** ~50 hand-verified sentence→item-list pairs, checked in
-  as golden data. Per the repo's own rule, this fixture comes from human
-  verification, never from the pipeline's own output.
-- **Translation choice.** Many jpn sentences link to several eng translations,
-  some indirectly. Pick one, deterministically, and record the rule.
-- **Attribution.** CC BY is per-author. Sentence ids resolve to authors, so
-  keeping ids is likely sufficient — `data/SOURCES.md` must state that
-  reasoning explicitly rather than leave it implied.
+Every question revision 3 left open is now answered:
 
-## 4. Schema
+- **Function words.** Particles, auxiliaries and punctuation are ignored.
+  The allowlist is proper nouns (katakana only) and numerals, chosen by
+  measurement: affixes and non-independent verbs bought 2.1pp of sentences for
+  the price of admitting grammar the learner has not studied.
+- **Lemma to item.** `orthBase` first, contextual `kana` to disambiguate,
+  reading-only matching restricted to kana-written words, counters split from
+  standalone nouns by POS.
+- **Acceptance test.** 56 hand-verified pairs across seven failure modes,
+  locked by `src/sentences.test.ts`.
+- **Translation choice.** Lowest linked English id: deterministic, and the
+  oldest translation is usually the most reviewed.
+
+Six defects were found by reading sample mappings by hand, every one invisible
+in the aggregate numbers: a suffix resolved to the wrong reading, multi-form
+readings never matching, a mis-tagged proper noun admitting an out-of-bank
+word, a kana token guessing a kanji entry, dual-reading words served as
+targets, and a word landing in both the certain and ambiguous lists. Together
+they cost 1.2 points of gate coverage.
+
+## 4. Runtime — Phase 2, TO BUILD
 
 ```sql
 CREATE TABLE sentences (
   id        INTEGER PRIMARY KEY,   -- Tatoeba id: attribution + blacklisting
   ja        TEXT NOT NULL,
   en        TEXT NOT NULL,
-  n_items   INTEGER NOT NULL,      -- bank items it contains
-  n_unheard INTEGER NOT NULL       -- of those, how many are not yet known-by-ear
+  author    TEXT,
+  n_items   INTEGER NOT NULL,
+  n_unheard INTEGER NOT NULL       -- of those, not yet known by ear
 );
 CREATE TABLE sentence_items (
   sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
   item_id     INTEGER NOT NULL REFERENCES items(id)     ON DELETE CASCADE,
+  ambiguous   INTEGER NOT NULL DEFAULT 0,   -- context-only, never a target
   PRIMARY KEY (sentence_id, item_id)
 );
 CREATE INDEX idx_sentence_items_item ON sentence_items(item_id, sentence_id);
-CREATE INDEX idx_sentences_ready     ON sentences(n_unheard, n_items);
 ```
 
-**`n_unheard` is materialised, not computed per query.** A correlated
-`NOT EXISTS` over candidate sentences is the exact shape that caused the 29x
-regression fixed by `idx_reviews_item` (`db.ts:77-81`). Pay at write time.
+**`n_unheard` is materialised.** A correlated `NOT EXISTS` per candidate is the
+shape that caused the 29x regression fixed by `idx_reviews_item`
+(`db.ts:77-81`). Pay at write time.
 
-**The decrement fires at graduation, not at introduction.** Revision 2 hooked
-the `introduced` 0→1 flip — but `grade()` sets `introduced = 1` on the *first*
-review, while the card is still in `learning` walking steps `[1m, 10m]`
-(`fsrs.ts:69`). Hooking there implements "introduced", which is precisely the
-predicate §2 exists to reject: a word heard once, sixty seconds ago, would
-count as known by ear. Worse, a word the learner keeps failing never leaves
-learning, so the words *least* known by ear would be admitted first.
+**The decrement fires at graduation, not introduction.** `grade()` sets
+`introduced = 1` on the FIRST review, while the card is still walking learning
+steps `[1m, 10m]` (`fsrs.ts:69`). Hooking there implements "introduced" — the
+predicate §2 exists to reject — and worse, a word the learner keeps failing
+never leaves learning, so the words least known by ear would be admitted
+first. The correct event is `before.state === 'learning' && after.state ===
+'review'`, conditioned on `q.mode === 'listening'`. Safe as a one-way counter:
+a lapse goes `review -> relearning` (`fsrs.ts:221-223`), never back to
+`learning`.
 
-The correct event is `before.state === 'learning' && after.state === 'review'`,
-conditioned on `q.mode === 'listening'`. This is safe as a one-way counter
-because FSRS state transitions are monotone here: a lapse goes
-`review → relearning` (`fsrs.ts:221-223`), never back to `learning`. So
-"has graduated" never un-flips and a single decrement is correct.
+**Eligibility, without a correlated subquery.** Look up the target's own
+known-by-ear status once per call, then
 
-Eligibility for target item X, without reintroducing a correlated subquery:
-look up X's own known-by-ear status once per call, then
+- target known   -> require `n_unheard = 0`
+- target unknown -> require `n_unheard = 1`
 
-- X known    -> require `n_unheard = 0`
-- X unknown  -> require `n_unheard = 1`
-
-because X ∈ sentence ∧ X unheard ∧ `n_unheard = 1` entails the single unheard
-item *is* X. Two-case dispatch, both indexable.
+because target ∈ sentence ∧ target unheard ∧ `n_unheard = 1` entails the one
+unheard item is the target.
 
 **`grade()` must become transactional.** It runs `UPDATE cards` and
-`INSERT reviews` as separate statements (`quiz.ts:302-309`); a crash between
-them costs one log row today. A missed decrement on a monotone counter is
-permanent, silent drift — sentences that never become eligible, invisible to
-every test. Wrap it, and make the importer's recompute double as the repair
-path with an invariant test sampling `n_unheard` against ground truth.
+`INSERT reviews` separately (`quiz.ts:302-309`). A missed decrement on a
+monotone counter is permanent, silent drift. Wrap it; make the importer's
+recompute the repair path; add an invariant test sampling `n_unheard` against
+ground truth.
 
-**Import must recompute, never preserve.** How `data/sentences.json` reaches
-SQLite is a real design task, not a detail: which command loads it, whether
-reload is idempotent, and that import initialises `n_unheard` from the *current*
-cards state. Re-import after a corpus update recomputes.
+**Import recomputes, never preserves.** Which command loads the JSON, whether
+reload is idempotent, and that `n_unheard` is initialised from the CURRENT
+cards state.
 
-## 5. Code changes
+**`reviews` needs `sentence_id`.** Without it the Hard-rate check below, the
+promote-later criterion and the availability stat are all impossible — the
+review log records no stimulus (`quiz.ts:307-309`). This is the repo's first
+schema MIGRATION: `openDb` only does `CREATE TABLE IF NOT EXISTS`
+(`db.ts:25-82`) and will not add a column to an existing `study.db`. Needs a
+guarded `ALTER TABLE` behind `PRAGMA table_info`.
 
-`src/sentences.ts` (new) — `pickSentence(db, itemId)`, returning the shortest
-eligible sentence, deterministic tiebreak by id. Returns null when none.
+**Choices are NOT unchanged.** With a word stimulus "what did you hear" is
+unambiguous; with a sentence the learner must infer which word is the target.
+`distractors()` excludes only the target's own meaning (`bank.ts:161`), so
+eventually a distractor IS the meaning of a context word — two choices are then
+things the learner heard, and perfect comprehension grades as Again. Exclude
+the meanings of every item in the sentence, and name the task: "Which of these
+did you hear?"
 
-`src/quiz.ts` — `buildQuestion` case `"listening"` sets `audioText` to the
-sentence when one exists, the word otherwise. Add `sentenceId` to `Question`
-so it survives `pending` and `--json`, for blacklisting and stats.
+**`reveal` must show the sentence.** It renders only word / reading / meaning
+(`quiz.ts:213`). The `en` column exists.
 
-**Choices are NOT unchanged.** Revision 2 said they were, and that is a bug.
-With a word stimulus, "what did you hear" is unambiguous. With a sentence, the
-learner hears five or more words and must infer which one is the target — in
-practice, "the choice matching something I heard". `distractors()` excludes
-only the target's own meaning (`bank.ts:161`), drawing the rest at random from
-the same level, so eventually a distractor *is* the meaning of a context word
-in that sentence. Then two choices are things the learner heard, and perfect
-comprehension grades as Again — manufacturing wrong answers out of right ones,
-corrupting exactly the signal this design exists to protect.
+**`ratingFor` must scale with the stimulus.** Any correct answer over 12s is
+rated Hard (`quiz.ts:278-282`), and a sentence takes longer than a word; the
+TUI's `r` replay counts against the same clock. Verify against the review log
+after rollout — which is why `sentence_id` is not optional.
 
-Fix: exclude the meanings of every item in the sentence from the distractor
-pool (`sentence_items` is already in hand), and say what the task is:
-"Which of these did you hear?"
-
-**`reveal` must show the sentence.** It renders only word【reading】— meaning
-(`quiz.ts:213`), so after a sentence stimulus the learner never sees the
-sentence or its translation. The `en` column exists; use it.
-
-`src/cli.ts` — already done, ahead of this plan: the three `q.mode ===
-"listening"` comparisons are now `hasAudioStimulus(q)`, and the project has a
-`tsconfig.json` and `bun run typecheck`, which found a live type error in
-`cmdExam` that had been silently disabling voice rotation in mock exams.
-
-**`reviews` needs a `sentence_id` column.** §5's own rollout verification —
-"check the Hard rate against the review log" — is impossible without it, and so
-is §0's promote-later criterion and §1's availability stat: the review log
-(`quiz.ts:307-309`) records no stimulus. This is the repo's first schema
-*migration*: `openDb` only does `CREATE TABLE IF NOT EXISTS` (`db.ts:25-82`),
-which will not add a column to an existing `data/study.db` with real history.
-Needs a guarded `ALTER TABLE` behind a `PRAGMA table_info` check. The new
-tables are fine as-is.
-
-**`cmdExam` must opt out, explicitly.** Exam questions flow through the same
+**`cmdExam` must opt out, explicitly.** Exam items flow through the same
 `nextQuestion` -> `buildQuestion` path (`cli.ts:205-223`), so mock-exam
-listening items would silently become sentence items — changing the exam's
-calibration against the official word-level format mid-history and making
-scores incomparable across the rollout. Either flag it off for exams or accept
-it and say so. Deciding by accident is the only wrong option.
+listening would silently become sentence listening, changing calibration
+mid-history. Deciding by accident is the only wrong option.
 
-`ratingFor` (`quiz.ts:274-278`) rates any correct answer over 12s as Hard. A
-sentence takes longer to process than a word, and in the TUI the `r` replay
-counts against the same clock (`cli.ts:163-168`). Sentence-stimulus reviews
-would be systematically rated Hard, compressing intervals and flooding the
-queue. The threshold must scale with the stimulus, and this must be **verified
-against the review log after rollout**, not assumed.
+## 5. Gate — PASSED
 
-## 6. Phase 0: the gate
+Static coverage answers "for a learner who knows all 1,384 words". The binding
+question is coverage conditional on the known set over time, so
+`tools/simulate_gate.ts` drives the real engine — `seed`, `nextQuestion`,
+`grade` against a simulated clock — rather than reimplementing the policy.
 
-The gate metric in revision 1 — "% of the 1,384 bank words with at least one
-fully-covered sentence" — measures a learner who already knows all 1,384 words.
-It is not the binding constraint. Eligibility requires every *other* word
-already known-by-ear, so the real question is coverage **conditional on the
-learner's known set over time**.
+90% accuracy, the user's real configuration:
 
-The spike simulates the actual introduction schedule — N5 list order, the
-deficit-driven mode mix, 12 new cards/day, the known-by-ear rule of §2 — and
-reports, per day: how many introduced words have an eligible sentence, and how
-many distinct eligible sentences exist. Same data, one extra loop. It also
-replaces revision 1's guessed "enable at 100-150 words" with a derived date.
+| day | listening cards | with a sentence | % | distinct sentences |
+|-----|-----------------|-----------------|---|--------------------|
+| 15  | 81  | 25  | 30.9% | 18  |
+| 30  | 162 | 75  | 46.3% | 54  |
+| 60  | 324 | 206 | 63.6% | 163 |
+| 90  | 486 | 368 | 75.7% | 297 |
+| 120 | 648 | 516 | 79.6% | 417 |
 
-**Run the real engine, not a reimplementation.** The simulation has to
-reproduce deficit-driven mode mix, sibling cooldown, `skip_meaning_for_kanji`
-and graduation timing. Reimplementing that policy in the Python build tool
-would drift from `quiz.ts`. Instead: a Bun script, `openDb` on a temp path,
-`seed()`, then loop `nextQuestion`/`grade` against a simulated clock — the
-repo's own rule of validating with the engine, and cheaper than a faithful
-reimplementation.
+Threshold: >=50% by day 60, sustaining >=5 questions/day. **63.6% and 163
+sentences. Passed.**
 
-**State the rating policy.** All-Good inflates known-set growth and biases the
-gate optimistic in exactly the direction that passes it. Run a 90%-accuracy
-variant alongside.
+A 50%-accuracy control confirms the simulation exercises the scheduler: the
+queue saturates and new-card introduction flatlines at 380 instead of 648. The
+100% and 90% runs agree closely because new cards are limit-bound at 12/day.
 
-Gate on the **curve**, not one sample: report day 30 / 60 / 120. Target — at
-least half of introduced listening cards have an eligible sentence, and the
-pool sustains at least 5 sentence-stimulus questions per day. A corpus that is
-thin at day 60 but rich at day 120 should pass with a later enable date, not
-die. If no horizon reaches the target, corpus selection has failed on this bank
-and Plan B (offline generation, native-checked) is on the table.
+## 6. Timing
 
-**Sequencing correction.** Revision 2 said nothing should be built before this
-number exists. That understates it in one direction and overstates it in the
-other: the number is only trustworthy *after* §3's tokenizer, allowlist and
-50-pair golden fixture exist, because a broken lemma mapping corrupts coverage
-silently in either direction. The fixture precedes the gate.
+Enable around **day 30-45**, when roughly half of listening cards have a
+sentence. The learner is on day 3.
 
 ## 7. Risks
 
-| Risk | Severity | Mitigation |
+| Risk | Severity | Status |
 |---|---|---|
-| Corpus too thin under the real schedule | kills the feature | Phase 0 gate, measured conditionally |
-| Lemma→item mapping wrong | silently serves non-i+1 sentences | 50-pair hand-verified golden fixture |
-| Function-word allowlist too loose | i+1 guarantee weakens invisibly | allowlist checked in and reviewed |
-| Sentence reviews systematically rated Hard | queue floods | scale `ratingFor` by stimulus; verify against the review log — needs `reviews.sentence_id` |
-| A distractor is a context word's meaning | manufactures wrong answers from right ones | exclude all sentence items from the distractor pool |
-| Missed `n_unheard` decrement | permanent silent drift | transaction + recompute-on-import + invariant test |
-| Correlated subquery in the selector | repeat of a known 29x regression | materialise `n_unheard`; assert query plan in a test |
-| Tatoeba sentence quality uneven | medium | prefer short, high-link-count; keep ids so bad ones blacklist like `false_friends.txt` |
-| CC BY attribution | legal | `data/SOURCES.md`, settled before corpus data is committed |
-| TTS quota: ~30-char sentences vs ~3-char words | low | 0.5M/month ≈ 15k sentence clips; tracker already hard-stops |
+| Corpus too thin under the real schedule | killed the feature | **retired** — gate passed |
+| Lemma-to-item mapping wrong | serves non-i+1 sentences | **retired** — 56-pair fixture, 6 defects fixed |
+| CC BY attribution | legal | **retired** — CREDITS.md, 633 named |
+| TTS reads a word differently from our annotation | wrong audio | **retired for single words** (`b047349`); for sentences, dual-reading words cannot be targets |
+| Sentence reviews systematically rated Hard | queue floods | open — needs `reviews.sentence_id` |
+| Distractor is a context word's meaning | manufactures wrong answers | open — exclude all sentence items |
+| Missed `n_unheard` decrement | permanent silent drift | open — transaction + recompute + invariant test |
+| Tatoeba sentence quality uneven | medium | open — ids kept, blacklist like `false_friends.txt` |
+| TTS quota, ~30-char sentences | low | 0.5M/month is ~15k clips; tracker hard-stops |
 
-## Already fixed (out of this plan's scope)
+## Landed ahead of this plan
 
-Review found that `introducedByMode` used `as Record<Mode, number>`, so adding
-any fifth mode would have compiled clean with an undefined count, turning every
-deficit into NaN and silently collapsing mode priority to declaration order.
-Fixed and mutation-verified in `cf9cb76`. That commit's message overstates the
-before-state: `db.ts:14` and `quiz.ts:13` already errored; only
-`introducedByMode`'s site was silent. The hazard was the editing flow — fix the
-two reported errors, and the cast stays quiet until runtime NaN.
-
-Separately, the project now has `tsconfig.json` and `bun run typecheck`, which
-immediately found a live type error disabling voice rotation in mock exams, and
-the mode-string audio checks became `hasAudioStimulus(q)`. Both landed ahead of
-this plan.
+- `cf9cb76` — a missing mode is a compile error, not a NaN cascade.
+- `f0d74c8` — `tsconfig.json` and `bun run typecheck`; found a live type error
+  that had disabled voice rotation in mock exams. Audio playback now asks
+  `hasAudioStimulus(q)` instead of comparing mode strings in three places.
+- `b047349` — listening cards synthesized the WRITTEN form, so both cards of
+  the nine dual-reading entries played identical audio while expecting
+  different answers: 開く【あく】 played ひらく. Measured with Azure
+  pronunciation assessment, fixed by synthesizing the reading, verified the
+  same way.
+- `0f25784` — the corpus, credits and fixture above.
