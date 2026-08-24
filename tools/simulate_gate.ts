@@ -20,7 +20,11 @@ interface Sentence { id: number; items: number[]; ambiguous: number[] }
 
 const DAY = 86_400_000;
 const [, , corpusPath, daysArg] = Bun.argv;
-const DAYS = Number(daysArg ?? 120);
+if (!corpusPath) {
+  console.error("usage: bun tools/simulate_gate.ts <sentences.json> [days] [minItems]");
+  process.exit(1);
+}
+const DAYS = Number(daysArg ?? "120");
 const corpus: Sentence[] = await Bun.file(corpusPath).json();
 
 /**
@@ -31,7 +35,7 @@ const corpus: Sentence[] = await Bun.file(corpusPath).json();
  * SELECTS those degenerate cases, so the floor is what makes the feature mean
  * anything. Measured at 1 (no floor), 2, and 3.
  */
-const MIN_ITEMS = Number(Bun.argv[4] ?? 1);
+const MIN_ITEMS = Number(Bun.argv[4] ?? "1");
 
 // item -> sentences that can TARGET it (certain occurrence, not homophone-only)
 const byTarget = new Map<number, Sentence[]>();

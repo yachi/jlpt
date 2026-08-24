@@ -239,13 +239,38 @@ export function buildQuestion(
     case "listening": {
       const { choices, answerIndex } = shuffleWithAnswer(meaning, distractors(db, item, "meaning", 3, rng), rng);
       return { ...base, instruction: "Listen, then choose the meaning. (聴解)", prompt: "",
-        audioText: item.expression, audioIsStimulus: true, choices, answerIndex, answer: meaning };
+        audioText: speakableReading(item.reading), audioIsStimulus: true,
+        choices, answerIndex, answer: meaning };
     }
     case "production": {
       return { ...base, instruction: "Type the Japanese reading (kana).", prompt: meaning,
         choices: [], answerIndex: -1, answer: item.reading };
     }
   }
+}
+
+/**
+ * The kana to synthesize for a listening card.
+ *
+ * NOT the written form. Bank entries are written-form keyed, and nine of them
+ * share a kanji with a different word: 開く is both あく and ひらく, 空く is
+ * both あく and すく, 明日 is both あした and あす. Synthesizing the kanji
+ * makes the TTS pick one, so BOTH cards play the same audio while expecting
+ * different answers -- verified against Azure with pronunciation assessment:
+ * 開く reads ひらく (98 vs 60), 空く reads あく (95 vs 55), 止める reads
+ * とめる (94 vs 70). The reading is unambiguous, and synthesizing it was
+ * verified to produce exactly itself for all eight testable pairs.
+ *
+ * Readings also carry list notation ("いい; よい"), okurigana placeholders
+ * ("お～") and parenthetical suffixes ("けっこん (する)"); take the first
+ * listed form and drop the annotations, since only one can be spoken.
+ */
+export function speakableReading(reading: string): string {
+  const first = reading.split(/[;；/／]/)[0] ?? reading;
+  return first
+    .replace(/[（(][^）)]*[）)]/g, "")   // "(する)", "(〜を)"
+    .replace(/[～〜~]/g, "")
+    .trim();
 }
 
 /**

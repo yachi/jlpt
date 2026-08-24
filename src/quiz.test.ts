@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
-  parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus } from "./quiz";
+  parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus, speakableReading } from "./quiz";
 import { synthesize, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
   MACOS_JA_VOICES, AZURE_JA_VOICES } from "./tts";
 
@@ -122,6 +122,49 @@ describe("question construction", () => {
     const q = buildQuestion(db, items[0]!, "listening", false, mulberry(1));
     expect(q.prompt).toBe("");
     expect(q.audioText).toBeTruthy();
+  });
+
+  test("two words sharing a kanji get different listening audio", () => {
+    // 開く is あく and ひらく; 空く is あく and すく; 明日 is あした and あす.
+    // Synthesizing the written form makes the TTS pick one, so both cards play
+    // the SAME audio while expecting different answers. Verified against Azure:
+    // 開く reads ひらく, 空く reads あく, 止める reads とめる.
+    const shared = db.query<{ expression: string }, []>(
+      `SELECT expression FROM items
+        GROUP BY expression HAVING COUNT(DISTINCT reading) > 1`).all();
+    expect(shared.length, "bank should contain such pairs").toBeGreaterThan(0);
+
+    const collisions: string[] = [];
+    for (const { expression } of shared) {
+      const group = items.filter((i) => i.expression === expression);
+      const audio = group.map((i) =>
+        buildQuestion(db, i, "listening", false, mulberry(i.id)).audioText);
+      if (new Set(audio).size !== new Set(group.map((i) => i.reading)).size) {
+        collisions.push(`${expression}: ${audio.join(" / ")}`);
+      }
+    }
+    expect({ collisions }).toEqual({ collisions: [] });
+  });
+
+  test("listening audio is speakable kana, never list notation", () => {
+    // "いい; よい" and "けっこん (する)" cannot be spoken as written.
+    const messy = items.filter((i) => /[;；/／()（）～〜]/.test(i.reading));
+    expect(messy.length).toBeGreaterThan(0);
+    for (const i of messy.slice(0, 40)) {
+      const q = buildQuestion(db, i, "listening", false, mulberry(i.id));
+      expect({ r: i.reading, audio: q.audioText })
+        .toEqual({ r: i.reading, audio: expect.not.stringMatching(/[;；/／()（）～〜]/) });
+      expect(q.audioText!.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("speakableReading takes the first form and drops annotations", () => {
+    expect(speakableReading("いい; よい")).toBe("いい");
+    expect(speakableReading("けっこん (する)")).toBe("けっこん");
+    expect(speakableReading("(〜を) とお")).toBe("とお");
+    expect(speakableReading("お～")).toBe("お");
+    expect(speakableReading("なん; なに")).toBe("なん");
+    expect(speakableReading("あき")).toBe("あき");
   });
 
   test("only listening plays before the answer, though meaning also has audio", () => {
