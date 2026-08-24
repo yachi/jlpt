@@ -15,6 +15,8 @@ import {
 } from "./quiz";
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS,
   pickVoices, MACOS_JA_VOICES, AZURE_JA_VOICES, type SpeakOptions } from "./tts";
+import { importSentences, sentenceCoverage, sentencesEnabled, unheardDrift,
+  SENTENCE_SETTING } from "./sentences";
 
 const db = openDb();
 const argv = Bun.argv.slice(2);
@@ -204,8 +206,10 @@ async function cmdExam() {
   const ask = async (mode: Mode, n: number) => {
     let right = 0;
     for (let i = 0; i < n; i++) {
-      const q = nextQuestion(db, { level, mode, newLimit: 0 })
-        ?? nextQuestion(db, { level, mode, newLimit: 9999 });
+      // sentences: false — an exam measures against earlier sittings, so its
+      // listening section must not silently switch stimulus mid-history.
+      const q = nextQuestion(db, { level, mode, newLimit: 0, sentences: false })
+        ?? nextQuestion(db, { level, mode, newLimit: 9999, sentences: false });
       if (!q) break;
       console.log(renderQuestion(q, i + 1));
       await maybeSpeak(q, pickVoices());
@@ -288,6 +292,22 @@ async function cmdStats() {
     }
   }
 
+  const cov = sentenceCoverage(db);
+  if (cov.listening) {
+    console.log(C.bold("\nSentence listening"));
+    const pct = Math.round((cov.withSentence / cov.listening) * 100);
+    console.log(`  ${sentencesEnabled(db) ? C.green("on ") : C.dim("off")}          ${cov.withSentence}/${cov.listening} listening cards have a sentence (${pct}%), ${cov.distinct} distinct`);
+    const byStim = db.query<{ kind: string; n: number; hard: number }, []>(
+      `SELECT CASE WHEN sentence_id IS NULL THEN 'word' ELSE 'sentence' END AS kind,
+              COUNT(*) AS n, SUM(rating = 2) AS hard
+         FROM reviews WHERE mode = 'listening' GROUP BY kind`).all();
+    // The open risk is that sentence reviews are systematically rated Hard,
+    // which shortens intervals and floods the queue. This is the measurement.
+    for (const b of byStim) {
+      console.log(`  ${b.kind.padEnd(11)} ${String(b.n).padStart(5)} reviews  ${b.n ? Math.round((b.hard / b.n) * 100) : 0}% rated Hard`);
+    }
+  }
+
   const exams = db.query<any, []>("SELECT * FROM exams ORDER BY ts DESC LIMIT 5").all();
   if (exams.length) {
     console.log(C.bold("\nRecent mock exams"));
@@ -315,6 +335,34 @@ async function cmdTts() {
   console.log(`${C.dim(`[${r.provider}:${r.voice}]`)} ${text}\n${C.dim(r.path)}`);
 }
 
+/**
+ * Load data/sentences.json into the database. Replaces, then recomputes
+ * n_unheard from the current cards — so this is also the repair path if the
+ * incremental counter ever drifts.
+ */
+async function cmdImportSentences() {
+  if (flag("check")) {
+    const drift = unheardDrift(db);
+    const cov = sentenceCoverage(db);
+    if (JSON_OUT) { console.log(JSON.stringify({ drift, ...cov })); return; }
+    console.log(drift.length === 0
+      ? C.green(`  n_unheard agrees with the cards table for all ${db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sentences").get()!.n} sentences.`)
+      : C.red(`  ${drift.length} sentences drifted — re-run without --check to repair.`));
+    for (const d of drift.slice(0, 10)) console.log(`    ${d.id}: stored ${d.stored}, actual ${d.actual}`);
+    console.log(C.dim(`  ${cov.withSentence}/${cov.listening} introduced listening cards have a sentence (${cov.distinct} distinct).`));
+    return;
+  }
+  const r = await importSentences(db);
+  const cov = sentenceCoverage(db);
+  console.log(`Imported ${r.sentences} sentences, ${r.links} word links${r.blacklisted ? `, ${r.blacklisted} blacklisted` : ""}.`);
+  console.log(`  ${cov.withSentence}/${cov.listening} introduced listening cards have an eligible sentence (${cov.distinct} distinct).`);
+  if (!sentencesEnabled(db)) {
+    console.log(C.yellow(`  Sentence stimuli are OFF. Enable with: bun run cli set ${SENTENCE_SETTING} 1`));
+  }
+  console.log(C.dim("\n  Tatoeba, CC BY 2.0 FR — contributors are named in data/CREDITS.md."));
+  console.log(C.dim("  Drop a bad sentence by putting its id in data/sentence-blacklist.txt."));
+}
+
 function cmdSet() {
   const [, k, v] = argv;
   if (!k || v === undefined) { console.log("Usage: cli set <key> <value>   (e.g. new_per_day 8)"); return; }
@@ -334,6 +382,10 @@ ${C.bold("JLPT study CLI")}
   ${C.cyan("bun run cli stats")} [--json]       progress, weakest mode, TTS quota used
   ${C.cyan("bun run cli tts")} <text>           speak Japanese (Azure neural, or macOS fallback)
   ${C.cyan("bun run cli set")} new_per_day 8    change the daily new-card limit (default 5)
+  ${C.cyan("bun run cli import-sentences")}     load data/sentences.json (add --check to verify, not write)
+  ${C.cyan("bun run cli set")} ${SENTENCE_SETTING} 1
+                                    play a full sentence on listening cards whose
+                                    other words are all already known by ear
 
 ${C.dim("Azure neural voices are optional. Without a key it rotates the installed macOS ja_JP voices.")}
 ${C.dim("  export AZURE_SPEECH_KEY=...   export AZURE_SPEECH_REGION=japaneast")}
@@ -349,6 +401,7 @@ switch (cmd) {
   case "stats": await cmdStats(); break;
   case "tts": await cmdTts(); break;
   case "set": cmdSet(); break;
+  case "import-sentences": await cmdImportSentences(); break;
   default: cmdHelp();
 }
 db.close();

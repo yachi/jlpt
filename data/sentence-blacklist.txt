@@ -1,0 +1,7 @@
+# Tatoeba sentence ids to drop from the listening corpus, one per line.
+# `#` starts a comment. Re-run `bun run cli import-sentences` to apply.
+#
+# Tatoeba is user-contributed and its quality is uneven; the corpus keeps the
+# original id precisely so a bad sentence can be named and removed without
+# rebuilding anything. The id is also what resolves to the contributor named in
+# data/CREDITS.md, per CC BY 2.0 FR.

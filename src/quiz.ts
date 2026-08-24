@@ -3,6 +3,7 @@ import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
 import { distractors, shortMeaning, type Item } from "./bank";
 import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
 import { readingKey } from "./romaji";
+import { pickSentence, sentencesEnabled, decrementUnheardFor, type SentenceStimulus } from "./sentences";
 
 export const scheduler = new Scheduler();
 
@@ -88,6 +89,11 @@ export interface Question {
    * word already on screen; playing a listening card's is the whole card.
    */
   audioIsStimulus?: boolean;
+  /**
+   * Tatoeba id of the sentence played instead of the bare word, when one was
+   * eligible. Present only on `listening`; absent means the word was played.
+   */
+  sentenceId?: number;
   /** MC options; empty for typed production. */
   choices: string[];
   answerIndex: number;
@@ -136,6 +142,14 @@ export interface NextOptions {
   rng?: () => number;
   /** Override the configured daily new-card limit. */
   newLimit?: number;
+  /**
+   * Allow a sentence stimulus on listening cards. Defaults to the
+   * `sentence_listening` setting. The mock exam passes `false` explicitly:
+   * exam items flow through this same path, so without an opt-out its listening
+   * section would silently become sentence listening and the score would stop
+   * being comparable with earlier sittings.
+   */
+  sentences?: boolean;
 }
 
 /**
@@ -201,7 +215,15 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
     id: row.item_id, level: row.level, expression: row.expression,
     reading: row.reading, meaning: row.meaning, has_kanji: row.has_kanji,
   };
-  return buildQuestion(db, item, row.mode, isNew, rng);
+
+  let sentence: SentenceStimulus | null = null;
+  if (row.mode === "listening" && (opts.sentences ?? sentencesEnabled(db))) {
+    // Whether the TARGET is already known by ear decides which counter value
+    // makes a sentence i+1 for it — see pickSentence().
+    const targetKnown = row.introduced === 1 && row.state !== "learning";
+    sentence = pickSentence(db, row.item_id, targetKnown, rng);
+  }
+  return buildQuestion(db, item, row.mode, isNew, rng, sentence);
 }
 
 function shuffleWithAnswer(answer: string, wrong: string[], rng: () => number) {
@@ -215,11 +237,14 @@ function shuffleWithAnswer(answer: string, wrong: string[], rng: () => number) {
 
 export function buildQuestion(
   db: Database, item: Item, mode: Mode, isNew: boolean, rng: () => number = Math.random,
+  sentence: SentenceStimulus | null = null,
 ): Question {
   const meaning = shortMeaning(item.meaning);
   const base = {
     itemId: item.id, mode, level: item.level, isNew,
     section: MODE_SECTION[mode],
+    // Keep the expression【reading】head first: checkAnswer parses the written
+    // forms back out of it for typed grading.
     reveal: `${item.expression}【${item.reading}】— ${item.meaning}`,
   };
 
@@ -237,6 +262,23 @@ export function buildQuestion(
         choices, answerIndex, answer: item.reading };
     }
     case "listening": {
+      if (sentence) {
+        // Every OTHER word in the sentence is known by ear, so the learner
+        // heard several things they can name. Barring their glosses is what
+        // makes exactly one choice correct — otherwise perfect comprehension
+        // can pick a distractor and grade as Again.
+        const heard = sentence.itemIds.length
+          ? db.query<{ meaning: string }, []>(
+              `SELECT meaning FROM items WHERE id IN (${sentence.itemIds.join(",")})`)
+            .all().map((r) => shortMeaning(r.meaning))
+          : [];
+        const { choices, answerIndex } = shuffleWithAnswer(
+          meaning, distractors(db, item, "meaning", 3, rng, heard), rng);
+        return { ...base, instruction: "Which of these did you hear? (聴解)", prompt: "",
+          audioText: sentence.ja, audioIsStimulus: true, sentenceId: sentence.id,
+          reveal: `${base.reveal}\n    ${sentence.ja}\n    ${sentence.en}`,
+          choices, answerIndex, answer: meaning };
+      }
       const { choices, answerIndex } = shuffleWithAnswer(meaning, distractors(db, item, "meaning", 3, rng), rng);
       return { ...base, instruction: "Listen, then choose the meaning. (聴解)", prompt: "",
         audioText: speakableReading(item.reading), audioIsStimulus: true,
@@ -312,18 +354,46 @@ export function checkAnswer(q: Question, response: string | number): boolean {
   return forms.some((f) => f === given || readingKey(f) === givenKey);
 }
 
+/** Thinking budget for a card whose stimulus is text already on screen. */
+export const SLOW_MS = 12_000;
+
+/**
+ * Rough milliseconds of speech per Japanese character, at the -10% rate the
+ * study loop uses. Doubled below to allow one replay, which the TUI's `r` and
+ * a conversational driver's second play both charge to the same clock.
+ */
+const MS_PER_CHAR = 180;
+
+/**
+ * The "too slow" threshold for one question.
+ *
+ * A fixed 12s meant that listening to a 25-character sentence and answering
+ * correctly was rated Hard purely for the length of the audio — the stimulus
+ * has to be heard before the thinking can start. Applies to word audio too,
+ * for the same reason and to a much smaller degree.
+ *
+ * Calibration is checkable after rollout: reviews.sentence_id records which
+ * stimulus was played, so the Hard rate can be compared between the two.
+ */
+export function slowThresholdFor(q: Question): number {
+  if (!hasAudioStimulus(q)) return SLOW_MS;
+  return SLOW_MS + q.audioText.length * MS_PER_CHAR * 2;
+}
+
 /**
  * Map a graded response onto an FSRS rating.
- *   wrong                -> 1 Again
- *   right but slow (>12s) -> 2 Hard
- *   right                -> 3 Good
+ *   wrong                 -> 1 Again
+ *   right but slow        -> 2 Hard
+ *   right                 -> 3 Good
  * Rating 4 (Easy) is reserved for an explicit user override, so that ordinary
  * correct answers don't inflate intervals.
  */
-export function ratingFor(correct: boolean, elapsedMs: number, easyOverride = false): Rating {
+export function ratingFor(
+  correct: boolean, elapsedMs: number, easyOverride = false, slowMs = SLOW_MS,
+): Rating {
   if (!correct) return 1;
   if (easyOverride) return 4;
-  return elapsedMs > 12_000 ? 2 : 3;
+  return elapsedMs > slowMs ? 2 : 3;
 }
 
 export interface GradeResult {
@@ -337,21 +407,35 @@ export function grade(
 ): GradeResult {
   const now = opts.now ?? Date.now();
   const correct = checkAnswer(q, response);
-  const rating = ratingFor(correct, elapsedMs, opts.easy);
+  const rating = ratingFor(correct, elapsedMs, opts.easy, slowThresholdFor(q));
 
   const row = db.query<CardRow, [number, string]>(
     "SELECT * FROM cards WHERE item_id = ? AND mode = ?").get(q.itemId, q.mode);
   const before: Card = row && row.introduced === 1 ? toCard(row) : newCard(now);
   const after = scheduler.review(before, rating, now, opts.rng ?? Math.random);
 
-  db.query(
-    `UPDATE cards SET stability=?, difficulty=?, state=?, step=?, due=?, last_review=?, introduced=1
-      WHERE item_id=? AND mode=?`,
-  ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview, q.itemId, q.mode);
+  // One transaction. sentences.n_unheard is a monotone counter maintained by
+  // the third statement; if it were to miss while the card update landed, the
+  // drift would be permanent and silent — the sentence would simply stop being
+  // offered, and nothing would ever report it.
+  db.transaction(() => {
+    db.query(
+      `UPDATE cards SET stability=?, difficulty=?, state=?, step=?, due=?, last_review=?, introduced=1
+        WHERE item_id=? AND mode=?`,
+    ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview, q.itemId, q.mode);
 
-  db.query(
-    "INSERT INTO reviews (item_id, mode, rating, correct, ts, elapsed_ms) VALUES (?,?,?,?,?,?)",
-  ).run(q.itemId, q.mode, rating, correct ? 1 : 0, now, elapsedMs);
+    db.query(
+      "INSERT INTO reviews (item_id, mode, rating, correct, ts, elapsed_ms, sentence_id) VALUES (?,?,?,?,?,?,?)",
+    ).run(q.itemId, q.mode, rating, correct ? 1 : 0, now, elapsedMs, q.sentenceId ?? null);
+
+    // GRADUATION, not introduction. `introduced` is set on the first review,
+    // while the card is still walking the learning steps — hooking there would
+    // admit the words the learner knows LEAST well first. Monotone: a lapse
+    // goes review -> relearning, never back to learning (fsrs.ts:221-223).
+    if (q.mode === "listening" && before.state === "learning" && after.state === "review") {
+      decrementUnheardFor(db, q.itemId);
+    }
+  })();
 
   return {
     correct, rating, answer: q.answer, reveal: q.reveal,

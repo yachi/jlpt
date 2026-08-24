@@ -98,8 +98,11 @@ async function run(accuracy: number, label: string, checkpoints: number[]) {
       .map((r) => r.item_id);
 
     // A sentence is eligible for target X when every OTHER of its words is
-    // known by ear. Ambiguous (homophone) words count as known if any of their
-    // candidates is.
+    // known by ear -- ambiguous (homophone) tokens included, and strictly: ALL
+    // candidate readings of an ambiguous token must be known, not merely one.
+    // Stricter than necessary, but it never admits an unknown word, and the
+    // gate number below was measured under this rule, so the runtime
+    // (src/sentences.ts) implements the same one.
     const eligibleFor = (target: number) => {
       for (const s of byTarget.get(target) ?? []) {
         let ok = true;

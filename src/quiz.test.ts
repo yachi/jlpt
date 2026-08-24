@@ -507,6 +507,12 @@ describe("scheduling integration", () => {
   });
 });
 
+/**
+ * These tests exercise the real synthesis path, so each one spawns `say` (or
+ * calls Azure) two or three times. A single call costs seconds on a cold voice
+ * cache, which makes bun's 5s default timeout a flake rather than a signal —
+ * hence the explicit budgets below.
+ */
 describe("TTS cache safety", () => {
   // These tests synthesize for real. Pin them to the offline macOS provider:
   // with a key in the environment they would hit the network, spend Azure
@@ -538,7 +544,7 @@ describe("TTS cache safety", () => {
     expect(repaired).not.toBeNull();
     expect(statSync(repaired!.path).size).toBeGreaterThan(0);
     rmSync(repaired!.path, { force: true });
-  });
+  }, 30_000);
 
   test("no .part temp files survive a successful synthesis", async () => {
     const text = `一時ファイル試験${Date.now()}`;
@@ -546,7 +552,7 @@ describe("TTS cache safety", () => {
     expect(r).not.toBeNull();
     expect(existsSync(`${r!.path}.part`)).toBe(false);
     rmSync(r!.path, { force: true });
-  });
+  }, 30_000);
 
   test("each voice gets its own cache entry", async () => {
     // Regression: the cache key hardcoded the voice name, so switching voices
@@ -565,7 +571,7 @@ describe("TTS cache safety", () => {
     expect(hit).toMatchObject({ provider: "cache", voice: "Eddy", path: b!.path });
     rmSync(a!.path, { force: true });
     rmSync(b!.path, { force: true });
-  });
+  }, 30_000);
 
   test("the cache key names the voice, for either provider", () => {
     // The property that matters, tested without a network call: two voices must

@@ -134,6 +134,13 @@ export function shortMeaning(meaning: string): string {
  * Pick `n` distractors for an item. Distractors are drawn from the same JLPT
  * level so difficulty stays calibrated, and (for readings) biased toward the
  * same length and first mora so the question can't be solved by shape alone.
+ *
+ * `exclude` bars specific answer VALUES, not item ids: two different bank
+ * entries can share a gloss, so excluding by id would still let the same
+ * English through under a different word. The caller that needs this is
+ * sentence listening -- with a sentence stimulus, a distractor that glosses
+ * some OTHER word in the sentence is something the learner genuinely heard,
+ * and perfect comprehension would grade as Again.
  */
 export function distractors(
   db: Database,
@@ -141,6 +148,7 @@ export function distractors(
   field: "meaning" | "reading",
   n: number,
   rng: () => number = Math.random,
+  exclude: Iterable<string> = [],
 ): string[] {
   const targetVal = field === "meaning" ? shortMeaning(target.meaning) : target.reading;
   const pool = db
@@ -159,6 +167,7 @@ export function distractors(
   };
 
   const seen = new Set<string>([targetVal.toLowerCase()]);
+  for (const e of exclude) seen.add(e.toLowerCase());
   const candidates = pool
     .map((c) => ({ c, key: score(c) + rng() }))
     .sort((a, b) => b.key - a.key)

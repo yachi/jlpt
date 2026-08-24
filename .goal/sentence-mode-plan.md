@@ -1,7 +1,8 @@
 # Plan: sentences in listening practice
 
-Revision 4. Phases 0 and 1 are done and are recorded here as results, not
-intentions. What remains is Phase 2, the runtime.
+Revision 5. All three phases are done and are recorded here as results, not
+intentions. What remains is a decision the learner makes, not code: when to
+turn it on.
 
 | Rev | What changed |
 |-----|--------------|
@@ -9,6 +10,7 @@ intentions. What remains is Phase 2, the runtime.
 | 2 | Reframed: better stimulus for the existing listening card. |
 | 3 | Second review: hook fired at the wrong event, three correctness gaps. |
 | 4 | Phases 0-1 executed. The justification was wrong and is replaced. |
+| 5 | Phase 2 built. Mutation testing found one guard decorative. |
 
 ## 0. Two reframes
 
@@ -117,7 +119,7 @@ word, a kana token guessing a kanji entry, dual-reading words served as
 targets, and a word landing in both the certain and ambiguous lists. Together
 they cost 1.2 points of gate coverage.
 
-## 4. Runtime — Phase 2, TO BUILD
+## 4. Runtime — DONE
 
 ```sql
 CREATE TABLE sentences (
@@ -137,9 +139,13 @@ CREATE TABLE sentence_items (
 CREATE INDEX idx_sentence_items_item ON sentence_items(item_id, sentence_id);
 ```
 
+Shipped in `src/sentences.ts`, with the schema above unchanged from the plan.
+
 **`n_unheard` is materialised.** A correlated `NOT EXISTS` per candidate is the
 shape that caused the 29x regression fixed by `idx_reviews_item`
-(`db.ts:77-81`). Pay at write time.
+(`db.ts:77-81`). Pay at write time. `recomputeUnheard()` rebuilds it,
+`unheardDrift()` reports disagreement, and `cli import-sentences --check`
+exposes both.
 
 **The decrement fires at graduation, not introduction.** `grade()` sets
 `introduced = 1` on the FIRST review, while the card is still walking learning
@@ -166,16 +172,20 @@ monotone counter is permanent, silent drift. Wrap it; make the importer's
 recompute the repair path; add an invariant test sampling `n_unheard` against
 ground truth.
 
-**Import recomputes, never preserves.** Which command loads the JSON, whether
-reload is idempotent, and that `n_unheard` is initialised from the CURRENT
-cards state.
+**Import recomputes, never preserves.** `bun run cli import-sentences` replaces
+both tables and recomputes `n_unheard` from the CURRENT cards state, so a
+reload is idempotent and is also the repair path. It REFUSES a corpus that
+names an item the bank does not have: the corpus keys words by item id, so a
+bank that has shifted makes the mapping wrong, not merely incomplete.
+`data/sentence-blacklist.txt` drops individual Tatoeba ids.
 
-**`reviews` needs `sentence_id`.** Without it the Hard-rate check below, the
+**`reviews.sentence_id`.** Without it the Hard-rate check below, the
 promote-later criterion and the availability stat are all impossible — the
 review log records no stimulus (`quiz.ts:307-309`). This is the repo's first
 schema MIGRATION: `openDb` only does `CREATE TABLE IF NOT EXISTS`
-(`db.ts:25-82`) and will not add a column to an existing `study.db`. Needs a
-guarded `ALTER TABLE` behind `PRAGMA table_info`.
+(`db.ts:25-82`) and will not add a column to an existing `study.db`. `migrate()` runs a
+guarded `ALTER TABLE` behind `PRAGMA table_info`, and a test builds a database
+in the exact pre-migration shape to prove the guard fires and is re-runnable.
 
 **Choices are NOT unchanged.** With a word stimulus "what did you hear" is
 unambiguous; with a sentence the learner must infer which word is the target.
@@ -188,15 +198,21 @@ did you hear?"
 **`reveal` must show the sentence.** It renders only word / reading / meaning
 (`quiz.ts:213`). The `en` column exists.
 
-**`ratingFor` must scale with the stimulus.** Any correct answer over 12s is
-rated Hard (`quiz.ts:278-282`), and a sentence takes longer than a word; the
-TUI's `r` replay counts against the same clock. Verify against the review log
-after rollout — which is why `sentence_id` is not optional.
+**`ratingFor` scales with the stimulus.** Any correct answer over 12s was rated
+Hard, and the audio has to finish before the thinking starts. `slowThresholdFor`
+adds `2 x 180ms` per character — one playback plus one replay, since the TUI's
+`r` charges the same clock. The multiplier is an estimate, and `stats` now
+prints the Hard rate for word and sentence stimuli side by side so it can be
+corrected from data rather than argued about.
 
-**`cmdExam` must opt out, explicitly.** Exam items flow through the same
-`nextQuestion` -> `buildQuestion` path (`cli.ts:205-223`), so mock-exam
-listening would silently become sentence listening, changing calibration
-mid-history. Deciding by accident is the only wrong option.
+**`cmdExam` opts out, explicitly.** Exam items flow through the same
+`nextQuestion` -> `buildQuestion` path, so mock-exam listening would silently
+have become sentence listening, changing calibration mid-history. It now passes
+`sentences: false`, and a test forces a card that definitely has an eligible
+sentence to the front of the queue and asserts the two paths differ on it.
+
+**Off by default.** `sentence_listening` gates the whole thing; `stats` reports
+availability whether it is on or not, so the premise stays measured.
 
 ## 5. Gate — PASSED
 
@@ -225,7 +241,15 @@ queue saturates and new-card introduction flatlines at 380 instead of 648. The
 ## 6. Timing
 
 Enable around **day 30-45**, when roughly half of listening cards have a
-sentence. The learner is on day 3.
+sentence:
+
+```fish
+bun run cli set sentence_listening 1
+```
+
+The learner is on day 3, so availability is 0/6 — turning it on today would
+change nothing except the risk of forgetting it is on. `cli stats` prints the
+number to watch.
 
 ## 7. Risks
 
@@ -235,11 +259,31 @@ sentence. The learner is on day 3.
 | Lemma-to-item mapping wrong | serves non-i+1 sentences | **retired** — 56-pair fixture, 6 defects fixed |
 | CC BY attribution | legal | **retired** — CREDITS.md, 633 named |
 | TTS reads a word differently from our annotation | wrong audio | **retired for single words** (`b047349`); for sentences, dual-reading words cannot be targets |
-| Sentence reviews systematically rated Hard | queue floods | open — needs `reviews.sentence_id` |
-| Distractor is a context word's meaning | manufactures wrong answers | open — exclude all sentence items |
-| Missed `n_unheard` decrement | permanent silent drift | open — transaction + recompute + invariant test |
-| Tatoeba sentence quality uneven | medium | open — ids kept, blacklist like `false_friends.txt` |
+| Sentence reviews systematically rated Hard | queue floods | **instrumented** — `reviews.sentence_id` + the Hard-rate split in `stats`; the threshold constant is still an estimate |
+| Distractor is a context word's meaning | manufactures wrong answers | **retired** — all sentence items barred by gloss |
+| Missed `n_unheard` decrement | permanent silent drift | **retired** — one transaction, plus recompute, drift report and an atomicity test |
+| Tatoeba sentence quality uneven | medium | **mitigated** — `data/sentence-blacklist.txt` |
 | TTS quota, ~30-char sentences | low | 0.5M/month is ~15k clips; tracker hard-stops |
+
+## 8. What the tests are worth
+
+Nine guards were mutation-tested — each deliberately broken, then the suite
+re-run. Eight killed their mutant. **One did not**: the distractor exclusion.
+The test sampled 60 random seeds, and a banned gloss is drawn on roughly 1% of
+calls, so it passed with the exclusion removed. It now searches 600 seeds for
+the ones that actually collide, asserts that set is non-empty, and checks the
+exclusion suppresses exactly those. Without that change the most user-visible
+guarantee in this feature -- that perfect comprehension cannot grade as Again --
+had no test at all.
+
+| Layer | Status |
+|---|---|
+| 1 unit | 21 sentence tests, 122 total |
+| 2 integration | 300+ questions through the real scheduler and the real corpus, zero counter drift |
+| 3 mutation | 9/9 guards kill their mutant |
+| 4 property | not done — eligibility is a candidate |
+| 7 adversarial | the plan's three review rounds; not re-run against the built code |
+| 8 invariants | `unheardDrift()` in code, exposed by `--check` |
 
 ## Landed ahead of this plan
 
