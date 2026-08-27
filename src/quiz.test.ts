@@ -7,7 +7,7 @@ import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
 import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, productionPrompt, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
   parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus, speakableReading } from "./quiz";
-import { synthesize, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
+import { synthesize, speak, play, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
   MACOS_JA_VOICES, AZURE_JA_VOICES } from "./tts";
 
 const db = openDb(join(mkdtempSync(join(tmpdir(), "jlpt-")), "t.db"));
@@ -683,4 +683,36 @@ describe("a production prompt must determine its answer", () => {
       && productionPrompt(db, i).prompt === shortMeaning(i.meaning));
     expect(plain.length).toBeGreaterThan(1000);
   });
+});
+
+describe("playback failure is reported, not swallowed", () => {
+  /**
+   * play() used to discard afplay's exit code. That is harmless for audio that
+   * decorates a question and wrong for a listening card, where the audio IS the
+   * question: a wedged CoreAudio presented an unanswerable card and graded the
+   * guess. Observed three times in one week — it wedges on sleep/wake, so this
+   * is a routine state, not an exotic one.
+   */
+  test("play() reports false when afplay cannot play the file", async () => {
+    if (process.platform !== "darwin") return;
+    // A file afplay will refuse: present, readable, and not audio.
+    const bogus = join(mkdtempSync(join(tmpdir(), "jlpt-play-")), "not-audio.aiff");
+    writeFileSync(bogus, "this is not an audio file");
+    expect(await play(bogus)).toBe(false);
+  }, 30_000);
+
+  test("play() reports false for a file that does not exist", async () => {
+    if (process.platform !== "darwin") return;
+    expect(await play(join(tmpdir(), "jlpt-definitely-absent-9f3a2.aiff"))).toBe(false);
+  }, 30_000);
+
+  test("speak() carries whether the learner actually heard it", async () => {
+    if (process.platform !== "darwin") return;
+    // Synthesis succeeds and playback is attempted, so `played` must be set
+    // either way — an undefined here is the silent-failure shape returning.
+    const r = await speak(`再生試験${Date.now()}`, { macVoice: "Kyoko" });
+    expect(r).not.toBeNull();
+    expect(typeof r!.played).toBe("boolean");
+    rmSync(r!.path, { force: true });
+  }, 30_000);
 });

@@ -141,6 +141,11 @@ export interface SynthResult {
   provider: "azure" | "macos" | "cache";
   /** The voice actually used, so a caller can report or reproduce it. */
   voice: string;
+  /**
+   * Whether the clip reached the speakers. Set only by speak(); synthesize()
+   * leaves it undefined because it never plays anything.
+   */
+  played?: boolean;
   charsBilled: number;
 }
 
@@ -226,11 +231,23 @@ export async function synthesize(text: string, opts: SpeakOptions = {}): Promise
 export async function speak(text: string, opts: SpeakOptions = {}): Promise<SynthResult | null> {
   const r = await synthesize(text, opts);
   if (!r) return null;
-  await play(r.path);
-  return r;
+  return { ...r, played: await play(r.path) };
 }
 
-export async function play(path: string): Promise<void> {
-  if (process.platform !== "darwin") return;
-  await Bun.spawn(["afplay", path]).exited;
+/**
+ * Play a cached clip. Returns whether it was actually heard.
+ *
+ * The exit code used to be discarded, which is only harmless for audio that
+ * decorates a question. For a listening card the audio IS the question, so a
+ * silent failure presented an unanswerable card and graded the guess. macOS
+ * CoreAudio wedges on sleep/wake often enough that this is a routine state, not
+ * an exotic one: afplay then exits non-zero with "AudioQueueStart failed".
+ */
+export async function play(path: string): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+  const proc = Bun.spawn(["afplay", path], { stdout: "ignore", stderr: "pipe" });
+  if ((await proc.exited) === 0) return true;
+  const why = (await new Response(proc.stderr).text()).trim();
+  console.error(`[tts] playback failed: ${why || "afplay exited non-zero"}`);
+  return false;
 }

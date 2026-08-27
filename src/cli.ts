@@ -56,8 +56,21 @@ function renderQuestion(q: Question, n?: number): string {
   return `${n !== undefined ? C.dim(`#${n}  `) : ""}${head}${body}\n${choices}\n`;
 }
 
-async function maybeSpeak(q: Question, voices: SpeakOptions) {
-  if (hasAudioStimulus(q)) await speak(q.audioText, { rate: "-10%", ...voices });
+/**
+ * Play a question's audio. Returns false only when the learner needed to hear
+ * something and did not — a card with no audio stimulus is trivially fine.
+ */
+async function maybeSpeak(q: Question, voices: SpeakOptions): Promise<boolean> {
+  if (!hasAudioStimulus(q)) return true;
+  const r = await speak(q.audioText, { rate: "-10%", ...voices });
+  return r?.played === true;
+}
+
+/** What to print when the question could not be heard. */
+function unheardCard(): void {
+  console.log(C.red("\n  The audio did not play, so this card cannot be answered."));
+  console.log(C.dim("  Answering it now would grade a guess. macOS CoreAudio wedges on sleep/wake;"));
+  console.log(C.dim("  log out and back in (or reboot), then run this again.\n"));
 }
 
 // ---------------------------------------------------------------- commands
@@ -121,7 +134,7 @@ async function cmdNext() {
     return;
   }
   console.log(renderQuestion(q));
-  await maybeSpeak(q, voices);
+  if (!await maybeSpeak(q, voices)) unheardCard();
 }
 
 async function cmdAnswer() {
@@ -166,7 +179,10 @@ async function cmdStudy() {
     // One speaker per question: the exam plays the same recording twice, so a
     // replay must be the same clip, not a second roll of the dice.
     const voices = pickVoices();
-    await maybeSpeak(q, voices);
+    // Stop rather than skip: if CoreAudio is wedged, every later listening card
+    // fails the same way, and a loop that silently drops them looks like
+    // progress while teaching nothing.
+    if (!await maybeSpeak(q, voices)) { unheardCard(); printSummary(asked, right); return; }
 
     const t0 = Date.now();
     let response: string | null = null;
@@ -210,7 +226,8 @@ async function cmdExam() {
   console.log(C.bold(`\nMock ${level} — ${nK} knowledge + ${nL} listening. No feedback until the end.\n`));
   let kRight = 0, lRight = 0;
 
-  const ask = async (mode: Mode, n: number) => {
+  /** Returns null when the sitting has to be abandoned rather than scored. */
+  const ask = async (mode: Mode, n: number): Promise<number | null> => {
     let right = 0;
     for (let i = 0; i < n; i++) {
       // sentences: false — an exam measures against earlier sittings, so its
@@ -219,7 +236,9 @@ async function cmdExam() {
         ?? nextQuestion(db, { level, mode, newLimit: 9999, sentences: false });
       if (!q) break;
       console.log(renderQuestion(q, i + 1));
-      await maybeSpeak(q, pickVoices());
+      // An exam item nobody could hear must not be scored: it would depress the
+      // listening section against every earlier sitting.
+      if (!await maybeSpeak(q, pickVoices())) { unheardCard(); return null; }
       const raw = (prompt("  > ") ?? "").trim();
       const idx = q.mode === "production" ? raw : String(Number(raw) - 1);
       // Score only; do not disturb scheduling state.
@@ -232,8 +251,16 @@ async function cmdExam() {
     return right;
   };
 
-  kRight = await ask("meaning", nK);
-  lRight = await ask("listening", nL);
+  const k = await ask("meaning", nK);
+  const l = k === null ? null : await ask("listening", nL);
+  if (k === null || l === null) {
+    // Recording a sitting whose listening section was silent would put a
+    // fabricated score into the history the next sitting is compared against.
+    console.log(C.yellow("  Exam abandoned — nothing recorded."));
+    return;
+  }
+  kRight = k;
+  lRight = l;
 
   const kScore = Math.round((kRight / Math.max(1, nK)) * 120);
   const lScore = Math.round((lRight / Math.max(1, nL)) * 60);
