@@ -61,16 +61,52 @@ Checked explicitly at the top of `checkAnswer` rather than relying on
 `Number("?")` being NaN: a sentinel that grades wrong only by accident is one
 refactor away from grading right.
 
+### ~~4. A never-seen word was served as a blind quiz~~ FIXED
+
+Found by the learner, mid-session: a NEW `reading` card for 浴びる was served as
+four kana choices for a word never shown. "I don't know" was the only honest
+answer and it was recorded as a lapse — *「新既鬼識呀」*.
+
+Fix: `teach_new_first` (default on). A new card comes back with `teachFirst`,
+and the caller shows the word, its reading, its meaning and its audio instead
+of asking. `introduceCard()` marks it introduced and schedules the first real
+test `INTRODUCE_DELAY_MS` (10 min) later — not immediately, because quizzing a
+word seconds after showing it measures short-term memory. It writes **no review
+row**: nothing was asked, so there is nothing to record.
+
+Three second-order defects the tests caught, each now covered by a mutation
+test:
+- **The daily budget stopped being enforced.** It counted first *reviews*, and
+  an introduction writes none — so a learner taught 5 words and stopping would
+  be handed 5 more. Now counted on the new `cards.introduced_at` column.
+- **`grade()` did not stamp `introduced_at`**, so with `teach_new_first` off (or
+  inside the exam) the limit vanished entirely. Set with `COALESCE`, so it
+  records the first exit from the new queue rather than the latest review.
+- **The sibling cooldown went blind.** It read only the review log, so a word
+  taught as `meaning` could be introduced as `listening` seconds later — the
+  exact thing the cooldown exists to prevent. It now takes the later of the last
+  review and any sibling's `introduced_at`.
+
+Teaching also always speaks the *reading*: `reading` and `production` cards
+carry no audio at all, and `meaning` plays the expression, which is the kanji
+the TTS mispronounces (see `speakableReading`).
+
+The mock exam passes `teachNew: false` — an exam measures, and teaching
+mid-sitting would leak the answer and drop the question from the score.
+
+Migration verified on the live deck: all 61 introduced cards backfilled from
+their first review, 0 disagreements, 16 counted as introduced today.
+
 ## Open
 
-### 4. そちら's gloss is imprecise
+### 5. そちら's gloss is imprecise
 
 `そちら` is glossed "over there", which reads as the あ-series meaning. It is the
 そ-series: *that way, near you*. Lower stakes than あちら (it is not the exact
 gloss of a different word), but it belongs in `gloss-corrections.csv` once
 confirmed against a dictionary.
 
-### 5. Carried over from the sentence-mode plan
+### 6. Carried over from the sentence-mode plan
 
 - **Enable sentence mode** — `bun run cli set sentence_listening 1` around day
   30-45, when coverage reaches ~50%. Currently far below that.

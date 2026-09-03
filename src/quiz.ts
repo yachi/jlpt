@@ -69,6 +69,12 @@ export interface Question {
   itemId: number;
   mode: Mode;
   level: string;
+  /**
+   * This word has never been shown, so it should be TAUGHT rather than asked.
+   * The caller presents `reveal` and calls introduceCard(); grading a first
+   * sight of a word measures nothing. Off via the `teach_new_first` setting.
+   */
+  teachFirst?: boolean;
   /** Human-readable instruction. */
   instruction: string;
   /** Text shown on screen. Empty for listening (audio only). */
@@ -135,10 +141,48 @@ export function dueCount(db: Database, now = Date.now()) {
 
 function newIntroducedToday(db: Database, now = Date.now()): number {
   const startOfDay = new Date(now).setHours(0, 0, 0, 0);
+  // cards.introduced_at, not the review log: the budget is spent when a word is
+  // SHOWN, and with teach-first a card can be introduced today and not tested
+  // until tomorrow. Counting first reviews would hand out unlimited new words
+  // to anyone who stops before the follow-up test.
   return db.query<{ n: number }, [number]>(
-    `SELECT COUNT(DISTINCT item_id || ':' || mode) AS n FROM reviews
-     WHERE ts >= ? AND id IN (SELECT MIN(id) FROM reviews GROUP BY item_id, mode)`,
-  ).get(startOfDay)!.n;
+    "SELECT COUNT(*) AS n FROM cards WHERE introduced_at >= ?").get(startOfDay)!.n;
+}
+
+/**
+ * How long after being taught a new card is first tested.
+ *
+ * Not zero. Quizzing a word seconds after showing it measures short-term
+ * memory and FSRS records the result as knowledge -- the same defect as
+ * pre-teaching a word whose card is pending. Ten minutes is the second
+ * learning step, so the card rejoins the normal flow rather than getting a
+ * schedule of its own.
+ */
+export const INTRODUCE_DELAY_MS = 600_000;
+
+/**
+ * Show a new word for the first time, without testing it.
+ *
+ * A brand-new card was previously served as a blind four-choice quiz: the
+ * learner had never seen the word, so "I don't know" was the only honest answer
+ * and it was recorded as a lapse. Introduction is not a measurement, so it
+ * writes NO review row -- there is nothing to record about a question that was
+ * never asked.
+ *
+ * The stored state is exactly newCard(): NULL stability, `learning`, step 0. So
+ * the first real review still runs as a first review, and the scheduler needs
+ * no special case.
+ */
+export function introduceCard(
+  db: Database, itemId: number, mode: Mode, now = Date.now(),
+): { due: number } {
+  const due = now + INTRODUCE_DELAY_MS;
+  db.query(
+    `UPDATE cards SET introduced = 1, introduced_at = ?, state = 'learning', step = 0,
+                      stability = NULL, difficulty = NULL, last_review = NULL, due = ?
+      WHERE item_id = ? AND mode = ? AND introduced = 0`,
+  ).run(now, due, itemId, mode);
+  return { due };
 }
 
 export interface NextOptions {
@@ -148,6 +192,11 @@ export interface NextOptions {
   rng?: () => number;
   /** Override the configured daily new-card limit. */
   newLimit?: number;
+  /**
+   * Teach a never-seen word instead of asking it. Defaults to the
+   * `teach_new_first` setting; the mock exam passes `false`.
+   */
+  teachNew?: boolean;
   /**
    * Allow a sentence stimulus on listening cards. Defaults to the
    * `sentence_listening` setting. The mock exam passes `false` explicitly:
@@ -208,7 +257,14 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
          FROM cards c JOIN items i ON i.id = c.item_id
         WHERE c.introduced = 0${levelSql}${modeSql}${skipKanjiMeaning}
         ORDER BY ${modeRank} ASC,
-                 COALESCE((SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = c.item_id), 0) > ? ASC,
+                 -- "When did I last see this WORD, in any mode?" Introductions
+                 -- count: they write no review row, so reading the review log
+                 -- alone would let a word taught as 'meaning' be introduced as
+                 -- 'listening' seconds later -- the very thing the cooldown
+                 -- exists to stop.
+                 MAX(COALESCE((SELECT MAX(r.ts) FROM reviews r WHERE r.item_id = c.item_id), 0),
+                     COALESCE((SELECT MAX(s.introduced_at) FROM cards s WHERE s.item_id = c.item_id), 0)
+                 ) > ? ASC,
                  CASE i.level WHEN 'N5' THEN 0 ELSE 1 END, c.item_id ASC
         LIMIT 1`,
       // NOTE: positional `?` bind in SQL text order — the WHERE params come
@@ -229,7 +285,18 @@ export function nextQuestion(db: Database, opts: NextOptions = {}): Question | n
     const targetKnown = row.introduced === 1 && row.state !== "learning";
     sentence = pickSentence(db, row.item_id, targetKnown, rng);
   }
-  return buildQuestion(db, item, row.mode, isNew, rng, sentence);
+  const q = buildQuestion(db, item, row.mode, isNew, rng, sentence);
+  // A word never shown before is taught, not asked — unless the caller opts out
+  // (the mock exam does: an exam measures, and teaching mid-sitting would both
+  // leak the answer and skip the question).
+  const teach = opts.teachNew ?? (getSetting(db, "teach_new_first", "1") === "1");
+  // Always speak the READING when teaching, whatever the mode would normally
+  // play. `reading` and `production` cards carry no audio at all, so a learner
+  // meeting 会う for the first time would never hear it; and `meaning` plays the
+  // expression, which is the kanji the TTS mispronounces — see speakableReading().
+  return isNew && teach
+    ? { ...q, teachFirst: true, audioText: speakableReading(item.reading), audioIsStimulus: false }
+    : q;
 }
 
 function shuffleWithAnswer(answer: string, wrong: string[], rng: () => number) {
@@ -454,9 +521,17 @@ export function grade(
   let cardWritten = 0;
   db.transaction(() => {
     cardWritten = db.query(
-      `UPDATE cards SET stability=?, difficulty=?, state=?, step=?, due=?, last_review=?, introduced=1
+      // COALESCE, not a plain assignment: introduced_at is the moment the card
+      // LEFT the new queue, whichever path took it out. introduceCard() sets it
+      // when a word is taught; this sets it when a card is graded without
+      // having been taught (teach_new_first off, or the exam). Overwriting it
+      // on every review would make the daily new-card counter read the whole
+      // deck as introduced today.
+      `UPDATE cards SET stability=?, difficulty=?, state=?, step=?, due=?, last_review=?,
+                        introduced=1, introduced_at=COALESCE(introduced_at, ?)
         WHERE item_id=? AND mode=?`,
-    ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview, q.itemId, q.mode).changes;
+    ).run(after.stability, after.difficulty, after.state, after.step, after.due, after.lastReview,
+          now, q.itemId, q.mode).changes;
 
     db.query(
       "INSERT INTO reviews (item_id, mode, rating, correct, ts, elapsed_ms, sentence_id) VALUES (?,?,?,?,?,?,?)",

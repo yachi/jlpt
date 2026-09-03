@@ -11,6 +11,7 @@ import { seed } from "./bank";
 import {
   nextQuestion, grade, dueCount, humanInterval, scheduler,
   introducedByMode, parseModeWeights, modePriority, hasAudioStimulus, DONT_KNOW,
+  introduceCard,
   type Question,
 } from "./quiz";
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS,
@@ -126,6 +127,23 @@ async function cmdNext() {
   const voices = pickVoices();
 
   if (JSON_OUT) {
+    // A teach-first card is not a question, so nothing is withheld: the whole
+    // point is to show the learner the answer. Acknowledge it with `cli seen`.
+    if (q.teachFirst) {
+      const audio = q.audioText
+        ? await synthesize(q.audioText, { rate: "-10%", ...voices })
+        : null;
+      console.log(JSON.stringify({
+        teach: {
+          itemId: q.itemId, mode: q.mode, level: q.level,
+          expression: q.prompt || q.audioText, reveal: q.reveal,
+          audioPath: audio?.path, audioVoice: audio?.voice,
+          instruction: "New word — study it, then run: cli seen",
+        },
+        ...dueCount(db),
+      }));
+      return;
+    }
     // answerIndex withheld so an LLM driving this can't see the key.
     const { answerIndex, answer, reveal, ...safe } = q;
     // Synthesize before printing and hand back the path: a conversational
@@ -140,8 +158,34 @@ async function cmdNext() {
     }));
     return;
   }
+  if (q.teachFirst) {
+    console.log(C.bold(`\n  NEW — ${q.level} · ${q.mode}`));
+    console.log(`  ${q.reveal}\n`);
+    if (q.audioText) await speak(q.audioText, { rate: "-10%", ...voices });
+    const { due } = introduceCard(db, q.itemId, q.mode);
+    setSetting(db, "pending", "");
+    console.log(C.dim(`  Studied. First test ${humanInterval(due - Date.now())} from now.\n`));
+    return;
+  }
   console.log(renderQuestion(q));
   if (!await maybeSpeak(q, voices)) unheardCard();
+}
+
+/**
+ * Acknowledge a taught card, for the --json flow where `next` cannot both show
+ * the word and wait for the learner to have read it.
+ */
+function cmdSeen() {
+  const q = pendingLoad();
+  if (!q) { console.log(C.yellow("No pending card. Run: bun run cli next")); return; }
+  if (!q.teachFirst) {
+    console.log(C.red("The pending card is a question, not a new word. Answer it: cli answer <n>"));
+    return;
+  }
+  const { due } = introduceCard(db, q.itemId, q.mode);
+  setSetting(db, "pending", "");
+  if (JSON_OUT) console.log(JSON.stringify({ introduced: true, itemId: q.itemId, mode: q.mode, firstTestAt: due, ...dueCount(db) }));
+  else console.log(C.dim(`  Studied. First test ${humanInterval(due - Date.now())} from now.\n`));
 }
 
 async function cmdAnswer() {
@@ -245,8 +289,10 @@ async function cmdExam() {
     for (let i = 0; i < n; i++) {
       // sentences: false — an exam measures against earlier sittings, so its
       // listening section must not silently switch stimulus mid-history.
-      const q = nextQuestion(db, { level, mode, newLimit: 0, sentences: false })
-        ?? nextQuestion(db, { level, mode, newLimit: 9999, sentences: false });
+      // teachNew: false — an exam measures. Teaching mid-sitting would leak the
+      // answer and drop the question from the score.
+      const q = nextQuestion(db, { level, mode, newLimit: 0, sentences: false, teachNew: false })
+        ?? nextQuestion(db, { level, mode, newLimit: 9999, sentences: false, teachNew: false });
       if (!q) break;
       console.log(renderQuestion(q, i + 1));
       // An exam item nobody could hear must not be scored: it would depress the
@@ -425,6 +471,7 @@ ${C.bold("JLPT study CLI")}
   ${C.cyan("bun run study")} [--level n5|n4] [--mode meaning|reading|listening|production] [--n 20]
   ${C.cyan("bun run cli next")} [--json]        show the next due card
   ${C.cyan("bun run cli answer <n>")} [--json]  answer the pending card (1-4, typed kana, or ? = don't know)
+  ${C.cyan("bun run cli seen")} [--json]        acknowledge a NEW word that was taught rather than asked
   ${C.cyan("bun run cli exam")} --level n5      mock exam scored against the real sectional floors
   ${C.cyan("bun run cli stats")} [--json]       progress, weakest mode, TTS quota used
   ${C.cyan("bun run cli tts")} <text>           speak Japanese (Azure neural, or macOS fallback)
@@ -443,6 +490,7 @@ switch (cmd) {
   case "seed": await cmdSeed(); break;
   case "next": await cmdNext(); break;
   case "answer": await cmdAnswer(); break;
+  case "seen": cmdSeen(); break;
   case "study": await cmdStudy(); break;
   case "exam": await cmdExam(); break;
   case "stats": await cmdStats(); break;

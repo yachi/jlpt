@@ -48,6 +48,10 @@ export function openDb(path = DB_PATH): Database {
       due         INTEGER NOT NULL,            -- epoch ms
       last_review INTEGER,
       introduced  INTEGER NOT NULL DEFAULT 0,  -- 0 = still in the new queue
+      -- When the word was first SHOWN, which is not when it was first tested.
+      -- The daily new-card budget is spent by introducing a word, so it has to
+      -- be counted here: a card taught but not yet quizzed writes no review row.
+      introduced_at INTEGER,
       PRIMARY KEY (item_id, mode)
     );
 
@@ -124,8 +128,21 @@ export function openDb(path = DB_PATH): Database {
  * not by a version number, so that running it twice is harmless.
  */
 function migrate(db: Database): void {
-  const cols = db.query<{ name: string }, []>("PRAGMA table_info(reviews)").all().map((c) => c.name);
-  if (!cols.includes("sentence_id")) db.exec("ALTER TABLE reviews ADD COLUMN sentence_id INTEGER");
+  const reviewCols = db.query<{ name: string }, []>("PRAGMA table_info(reviews)").all().map((c) => c.name);
+  if (!reviewCols.includes("sentence_id")) db.exec("ALTER TABLE reviews ADD COLUMN sentence_id INTEGER");
+
+  const cardCols = db.query<{ name: string }, []>("PRAGMA table_info(cards)").all().map((c) => c.name);
+  if (!cardCols.includes("introduced_at")) {
+    db.exec("ALTER TABLE cards ADD COLUMN introduced_at INTEGER");
+    // Backfill from the review log so an existing deck's daily counts and
+    // history survive: before this column, a card was introduced by its first
+    // review, so that review's timestamp IS the introduction time.
+    db.exec(`
+      UPDATE cards SET introduced_at = (
+        SELECT MIN(r.ts) FROM reviews r
+         WHERE r.item_id = cards.item_id AND r.mode = cards.mode)
+       WHERE introduced = 1 AND introduced_at IS NULL`);
+  }
 }
 
 export function getSetting(db: Database, k: string, fallback: string): string {
