@@ -74,8 +74,13 @@ export async function applyGlossCorrections(
 
   let applied = 0;
   const stale: string[] = [], missing: string[] = [];
-  for (const cells of parseCsv(await file.text()).slice(1)) {
+  // Skip `#` comments and the header by NAME, not by position: the file leads
+  // with a comment block explaining how to revise a correction, so slicing off
+  // "the first row" would drop a comment and feed the header in as data.
+  for (const cells of parseCsv(await file.text())) {
     if (cells.length < 5) continue;
+    const first = cells[0]!.trim();
+    if (first.startsWith("#") || first.toLowerCase() === "level") continue;
     const [level, expression, reading, was, now] = cells as [string, string, string, string, string];
     const row = get.get(level, expression, reading);
     if (!row) { missing.push(`${expression}【${reading}】`); continue; }

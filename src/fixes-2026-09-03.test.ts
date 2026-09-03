@@ -127,7 +127,7 @@ test("applyGlossCorrections replaces the gloss it asserts, and is idempotent", a
   expect(first.applied).toBe(1);
   expect(first.stale).toEqual([]);
   expect(db.query<{ meaning: string }, []>("SELECT meaning FROM items").get()!.meaning)
-    .toBe("that way, over there (polite)");
+    .toBe("over there (polite)");
 
   const second = await applyGlossCorrections(db);
   expect(second.applied).toBe(0);
@@ -151,6 +151,16 @@ test("a correction naming a word outside the bank is reported, not silent", asyn
   const db = openDb(":memory:");
   const r = await applyGlossCorrections(db);
   expect(r.applied).toBe(0);
-  expect(r.missing.length).toBe(1);
+  expect(r.missing).toContain("あちら【あちら】");
+  db.close();
+});
+
+test("comment and header lines are not read as corrections", async () => {
+  // data/gloss-corrections.csv opens with a `#` comment block, so slicing off
+  // "the first row" fed the HEADER in as a correction and reported
+  // `expression【reading】` missing from the bank on every seed.
+  const db = openDb(":memory:");
+  const r = await applyGlossCorrections(db);
+  expect(r.missing.some((m) => m.includes("expression") || m.includes("#"))).toBe(false);
   db.close();
 });

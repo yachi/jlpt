@@ -1,2 +1,20 @@
+# Deliberate overrides of a gloss that is wrong in the upstream CSV.
+#
+# `was` names the UPSTREAM value, so a correction can be checked rather than
+# trusted: if upstream changes, applyGlossCorrections() reports the row stale
+# and skips it instead of silently re-breaking a gloss someone has since fixed.
+#
+# To REVISE a correction, restore the item to its upstream value first, then
+# edit `now`. The stale check will (correctly) refuse to overwrite one
+# correction with another.
+#
+# Write `now` so its FIRST comma/semicolon-delimited clause already
+# distinguishes the word: shortMeaning() shows only that clause on a card, so a
+# distinction that lives after the first comma never reaches the learner.
+# Parenthesised text does not split, so "over there (polite)" survives whole.
 level,expression,reading,was,now,why
-N5,あちら,あちら,this way (polite),"that way, over there (polite)","The upstream row carries こちら's gloss verbatim — item こちら is ""this person (polite); this way (polite)"". あちら is the あ-series distal demonstrative (far from BOTH speaker and listener), the polite counterpart of あそこ/あっち. As shipped the card taught the opposite of what the word means. Cross-checked against そちら (near listener) and こちら (near speaker) in the same bank."
+N5,あちら,あちら,this way (polite),over there (polite),"The upstream row carries こちら's gloss verbatim — item こちら is ""this person (polite); this way (polite)"". あちら is the あ-series distal demonstrative (far from BOTH speaker and listener), the polite counterpart of あそこ/あっち. As shipped the card taught the opposite of what the word means. https://jisho.org/search/あちら"
+N5,あっち,あっち,over there,over there (casual),"Correct in sense, but indistinguishable from あちら on a card once あちら is fixed. The register IS the difference between them, so it belongs in the first clause."
+N5,そちら,そちら,over there,that way near you (polite),"そ-series, not あ-series. Jisho: ""that way; that direction — direction distant from the speaker, CLOSE TO THE LISTENER"". ""over there"" is the あ-series meaning, and the bank gave あちら, あっち, そちら and そっち the same gloss, erasing the whole こそあど distance grid. No comma before ""near you"": shortMeaning() would cut it off. https://jisho.org/search/そちら"
+N5,そっち,そっち,over there,that way near you (casual),"Same defect as そちら, casual register. Jisho gives the identical distance note. https://jisho.org/search/そっち"
+N4,空く,あく,"to open, to become empty (vacant)","to become empty (vacant), to become free","The senses are in the wrong order and shortMeaning() takes the first clause, so the card showed ""to open"" — which is 開く【あく】's meaning, for its homophone whose whole point is that it is NOT 開く. Jisho's first sense is ""to become less crowded; to thin out; to get empty""; ""to open"" is only sense 3. https://jisho.org/search/空く"

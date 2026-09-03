@@ -97,16 +97,71 @@ mid-sitting would leak the answer and drop the question from the score.
 Migration verified on the live deck: all 61 introduced cards backfilled from
 their first review, 0 disagreements, 16 counted as introduced today.
 
+### ~~5. The こそあど distance grid was erased, and 空く was glossed as 開く~~ FIXED
+
+Verified against Jisho and corrected via `data/gloss-corrections.csv`:
+
+| word | was | now |
+|---|---|---|
+| あちら | this way (polite) | over there (polite) |
+| あっち | over there | over there (casual) |
+| そちら | over there | that way near you (polite) |
+| そっち | over there | that way near you (casual) |
+| 空く【あく】 | to open, to become empty (vacant) | to become empty (vacant), to become free |
+
+あちら, あっち, そちら and そっち all carried the same or a swapped gloss, so the
+entire こそあど distance distinction — far from both vs. near the listener — was
+invisible on a card. Jisho gives そちら/そっち "direction distant from the
+speaker, **close to the listener**".
+
+空く had its senses in the wrong order, and `shortMeaning()` shows only the
+first clause — so the card read "to open", which is its homophone 開く's
+meaning, for the one word whose entire point is that it is *not* 開く. Jisho's
+first sense is "to become less crowded; to thin out; to get empty".
+
+Two things this exposed:
+
+- **Corrections must be written so the FIRST clause distinguishes the word.**
+  A first pass used "that way, near you (polite)" — `shortMeaning` cuts at the
+  comma, so the card showed "that way", colliding with あちら. Parenthesised
+  text does not split, so "over there (polite)" survives whole. Now documented
+  in the file's header.
+- **`applyGlossCorrections` read the header row as data.** Adding a `#` comment
+  block meant `.slice(1)` dropped a comment instead of the header, and every
+  seed warned that `expression【reading】` was missing from the bank. Comments
+  and the header are now skipped by name.
+
+The stale check earned its keep: it refused to overwrite one correction with
+another, which is exactly right. Revising a correction means restoring the item
+to its upstream CSV value first.
+
 ## Open
 
-### 5. そちら's gloss is imprecise
+### 6. `shortMeaning` truncation erases distinctions on 127 items (9.2%)
 
-`そちら` is glossed "over there", which reads as the あ-series meaning. It is the
-そ-series: *that way, near you*. Lower stakes than あちら (it is not the exact
-gloss of a different word), but it belongs in `gloss-corrections.csv` once
-confirmed against a dictionary.
+`shortMeaning()` takes everything before the first top-level comma or semicolon,
+and that is the only text a multiple-choice card ever shows. Measured across the
+bank: **60 gloss groups, 127 items (9.2%)**, where two different words collapse
+to the same short gloss *even though the source distinguishes them*. (Was 61
+groups / 130 items before the corrections above.)
 
-### 6. Carried over from the sentence-mode plan
+Examples: 薄い "thin, weak" and 細い "thin, slender, fine" both show **"thin"**;
+うち "home; house; my place" and 家庭 "home; family" both show **"home"**;
+こんな "such, like this" and そんな "such, like that" both show **"such"** —
+so the card teaches nothing about which is which.
+
+This is not the same bug as the homophone one (fixed above): those words have
+*different readings*, so a card is still answerable. The damage is pedagogical —
+the learner is taught a gloss that does not identify the word.
+
+Not yet fixed because the shape of the fix is a real decision: lengthen
+`shortMeaning` when a collision exists (changes what every card shows),
+disambiguate only the colliding pairs the way `productionPrompt()` does, or
+correct the 60 groups by hand in `gloss-corrections.csv`. The third is the only
+one that improves the *teaching* rather than just the *labels*, and it is also
+the most work.
+
+### 7. Carried over from the sentence-mode plan
 
 - **Enable sentence mode** — `bun run cli set sentence_listening 1` around day
   30-45, when coverage reaches ~50%. Currently far below that.
