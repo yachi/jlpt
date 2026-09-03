@@ -45,9 +45,52 @@ export function parseCsv(text: string): string[][] {
  * tanos.co.uk lists, which reconstruct the withdrawn 2004 JLPT 出題基準.
  * These lists are UNOFFICIAL: JLPT has published no syllabus since 2010.
  */
+/**
+ * Deliberate overrides of a gloss that is wrong in the upstream CSV.
+ *
+ * The CSVs are the external oracle for this bank and are never regenerated from
+ * code -- but an upstream row can simply be wrong, and shipping it teaches the
+ * learner the wrong thing. data/gloss-corrections.csv is the documented escape
+ * hatch: one row per override, carrying the value it replaces so the override
+ * can be checked rather than trusted.
+ *
+ * Each row is `level,expression,reading,was,now,why`. `was` is the assertion:
+ * if the CSV no longer says it, the upstream row changed under us and the
+ * correction is reported as stale instead of being applied blindly -- otherwise
+ * a fixed upstream would be silently re-broken by a correction nobody re-read.
+ *
+ * Gloss is not part of bankFingerprint() (which hashes id/level/expression/
+ * reading), so correcting one does NOT invalidate the sentence links.
+ */
+export async function applyGlossCorrections(
+  db: Database,
+): Promise<{ applied: number; stale: string[]; missing: string[] }> {
+  const file = Bun.file(join(ROOT, "data", "gloss-corrections.csv"));
+  if (!(await file.exists())) return { applied: 0, stale: [], missing: [] };
+
+  const get = db.query<{ id: number; meaning: string }, [string, string, string]>(
+    "SELECT id, meaning FROM items WHERE level = ? AND expression = ? AND reading = ?");
+  const upd = db.query("UPDATE items SET meaning = ? WHERE id = ?");
+
+  let applied = 0;
+  const stale: string[] = [], missing: string[] = [];
+  for (const cells of parseCsv(await file.text()).slice(1)) {
+    if (cells.length < 5) continue;
+    const [level, expression, reading, was, now] = cells as [string, string, string, string, string];
+    const row = get.get(level, expression, reading);
+    if (!row) { missing.push(`${expression}【${reading}】`); continue; }
+    if (row.meaning === now) continue;                 // already applied
+    if (row.meaning !== was) { stale.push(`${expression}【${reading}】: expected "${was}", found "${row.meaning}"`); continue; }
+    upd.run(now, row.id);
+    applied++;
+  }
+  return { applied, stale, missing };
+}
+
 export async function seed(
   db: Database, now = Date.now(),
-): Promise<{ items: number; cards: number; droppedSentences: number }> {
+): Promise<{ items: number; cards: number; droppedSentences: number;
+  corrections: { applied: number; stale: string[]; missing: string[] } }> {
   const insItem = db.query(
     `INSERT INTO items (level, expression, reading, meaning, has_kanji) VALUES (?,?,?,?,?)
      ON CONFLICT(level, expression, reading) DO NOTHING`,
@@ -73,6 +116,10 @@ export async function seed(
     for (const cells of rows.slice(1)) if (cells.length >= 3) all.push({ level, cells });
   }
   tx(all);
+
+  // Overrides run AFTER the insert: insItem is ON CONFLICT DO NOTHING, so an
+  // existing row's gloss is never updated by re-seeding.
+  const corrections = await applyGlossCorrections(db);
 
   await loadFalseFriends(db);
 
@@ -103,7 +150,7 @@ export async function seed(
     setSetting(db, BANK_FINGERPRINT_KEY, fingerprint);
   }
 
-  return { items: items.length, cards, droppedSentences };
+  return { items: items.length, cards, droppedSentences, corrections };
 }
 
 /**
@@ -229,6 +276,28 @@ export function productionPrompt(
  * some OTHER word in the sentence is something the learner genuinely heard,
  * and perfect comprehension would grade as Again.
  */
+/**
+ * Glosses of every OTHER bank item that shares this item's reading.
+ *
+ * A listening card plays the reading alone, so nothing in the stimulus can
+ * separate 暑い / 熱い / 厚い (all あつい). If a rival's gloss is offered as a
+ * distractor, TWO options are correct for what was played and one of them
+ * grades as Again. Measured over 20,000 built questions on the 100 items whose
+ * reading is shared: 31 (0.15%) had a second correct option, spread over 39
+ * items and peaking at 1.6% for 日【ひ】 against 火【ひ】.
+ *
+ * Only listening needs this. `meaning` and `reading` cards put the expression
+ * on screen, which is exactly what tells the homophones apart -- there a
+ * rival's gloss is the most instructive distractor in the bank, not a bug.
+ */
+export function homophoneGlosses(db: Database, item: Item): string[] {
+  return db
+    .query<{ meaning: string }, [string, number]>(
+      "SELECT meaning FROM items WHERE reading = ? AND id != ?")
+    .all(item.reading, item.id)
+    .map((r) => shortMeaning(r.meaning));
+}
+
 export function distractors(
   db: Database,
   target: Item,

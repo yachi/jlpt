@@ -10,7 +10,7 @@ import { openDb, getSetting, setSetting, MODES, type Mode } from "./db";
 import { seed } from "./bank";
 import {
   nextQuestion, grade, dueCount, humanInterval, scheduler,
-  introducedByMode, parseModeWeights, modePriority, hasAudioStimulus,
+  introducedByMode, parseModeWeights, modePriority, hasAudioStimulus, DONT_KNOW,
   type Question,
 } from "./quiz";
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS,
@@ -87,6 +87,13 @@ async function cmdSeed() {
       `  Dropped ${r.droppedSentences} sentence links: the item bank's identity changed, so they\n` +
       "  named different words than the corpus meant. Restore them with: bun run cli import-sentences"));
   }
+  const { applied, stale, missing } = r.corrections;
+  if (applied > 0) console.log(C.dim(`  Applied ${applied} gloss correction(s) from data/gloss-corrections.csv.`));
+  // A correction that no longer matches must be re-read by a human, not
+  // silently dropped: either upstream fixed the row (delete the correction) or
+  // it changed to something else that still needs checking.
+  for (const t of stale) console.log(C.yellow(`  Stale gloss correction — ${t}\n    Re-verify it, then update or delete the row in data/gloss-corrections.csv.`));
+  for (const m of missing) console.log(C.yellow(`  Gloss correction names ${m}, which is not in the bank.`));
   for (const c of counts) console.log(`  ${c.level}: ${c.n} words`);
   console.log(C.dim("\nSource: open-anki-jlpt-decks (MIT), derived from tanos.co.uk lists,"));
   console.log(C.dim("which reconstruct the WITHDRAWN 2004 JLPT 出題基準. Unofficial by construction —"));
@@ -141,7 +148,7 @@ async function cmdAnswer() {
   const q = pendingLoad();
   if (!q) { console.log(C.yellow("No pending question. Run: bun run cli next")); return; }
   const response = argv[1];
-  if (response === undefined) { console.log(C.red("Usage: cli answer <choice-number|typed-answer>")); return; }
+  if (response === undefined) { console.log(C.red("Usage: cli answer <choice-number|typed-answer|? = don't know>")); return; }
 
   // Wall-clock is only a valid proxy for thinking time in the interactive TUI.
   // When driven conversationally (--json), the gap between `next` and `answer`
@@ -152,7 +159,10 @@ async function cmdAnswer() {
   const elapsed = msFlag !== undefined
     ? Number.parseInt(msFlag, 10)
     : JSON_OUT ? 0 : shownAt ? Date.now() - shownAt : 0;
-  const idx = q.mode === "production" ? response : String(Number(response) - 1);
+  // "?" (or --dont-know) records a miss without inventing an answer.
+  const idx = response === DONT_KNOW || flag("dont-know")
+    ? DONT_KNOW
+    : q.mode === "production" ? response : String(Number(response) - 1);
   const r = grade(db, q, idx, elapsed, { easy: flag("easy") });
   setSetting(db, "pending", "");
 
@@ -169,7 +179,8 @@ async function cmdStudy() {
   console.log(C.dim(`TTS: ${azureConfigured()
     ? `Azure neural, ${AZURE_JA_VOICES.length} voices`
     : `macOS voices ${MACOS_JA_VOICES.join("/")} (set AZURE_SPEECH_KEY for neural voices)`}`));
-  console.log(C.dim("Answer with 1-4, type kana for production cards, 'r' to replay audio, 'q' to quit.\n"));
+  console.log(C.dim("Answer with 1-4, type kana for production cards, '?' if you don't know,"));
+  console.log(C.dim("'r' to replay audio, 'q' to quit.\n"));
 
   let asked = 0, right = 0;
   while (asked < limit) {
@@ -193,7 +204,9 @@ async function cmdStudy() {
       response = raw;
       break;
     }
-    const idx = q.mode === "production" ? response! : String(Number(response) - 1);
+    const idx = response === DONT_KNOW
+      ? DONT_KNOW
+      : q.mode === "production" ? response! : String(Number(response) - 1);
     const r = grade(db, q, idx, Date.now() - t0);
     asked++; if (r.correct) right++;
     console.log(r.correct ? C.green("  ✓ correct") : C.red(`  ✗ wrong — ${r.answer}`));
@@ -411,7 +424,7 @@ ${C.bold("JLPT study CLI")}
   ${C.cyan("bun run seed")}                     load the N5/N4 item bank (run once)
   ${C.cyan("bun run study")} [--level n5|n4] [--mode meaning|reading|listening|production] [--n 20]
   ${C.cyan("bun run cli next")} [--json]        show the next due card
-  ${C.cyan("bun run cli answer <n>")} [--json]  answer the pending card (1-4, or typed kana)
+  ${C.cyan("bun run cli answer <n>")} [--json]  answer the pending card (1-4, typed kana, or ? = don't know)
   ${C.cyan("bun run cli exam")} --level n5      mock exam scored against the real sectional floors
   ${C.cyan("bun run cli stats")} [--json]       progress, weakest mode, TTS quota used
   ${C.cyan("bun run cli tts")} <text>           speak Japanese (Azure neural, or macOS fallback)

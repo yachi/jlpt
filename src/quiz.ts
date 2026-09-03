@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
-import { distractors, shortMeaning, productionPrompt, type Item } from "./bank";
+import { distractors, homophoneGlosses, shortMeaning, productionPrompt, type Item } from "./bank";
 import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
 import { readingKey } from "./romaji";
 import { pickSentence, sentencesEnabled, decrementUnheardFor, type SentenceStimulus } from "./sentences";
@@ -279,13 +279,18 @@ export function buildQuestion(
             .all().map((r) => shortMeaning(r.meaning))
           : [];
         const { choices, answerIndex } = shuffleWithAnswer(
-          meaning, distractors(db, item, "meaning", 3, rng, heard), rng);
+          meaning,
+          distractors(db, item, "meaning", 3, rng, [...heard, ...homophoneGlosses(db, item)]),
+          rng);
         return { ...base, instruction: "Which of these did you hear? (聴解)", prompt: "",
           audioText: sentence.ja, audioIsStimulus: true, sentenceId: sentence.id,
           reveal: `${base.reveal}\n    ${sentence.ja}\n    ${sentence.en}`,
           choices, answerIndex, answer: meaning };
       }
-      const { choices, answerIndex } = shuffleWithAnswer(meaning, distractors(db, item, "meaning", 3, rng), rng);
+      // The stimulus is the reading alone, so a homophone's gloss would be a
+      // second correct answer -- see homophoneGlosses().
+      const { choices, answerIndex } = shuffleWithAnswer(
+        meaning, distractors(db, item, "meaning", 3, rng, homophoneGlosses(db, item)), rng);
       return { ...base, instruction: "Listen, then choose the meaning. (聴解)", prompt: "",
         audioText: speakableReading(item.reading), audioIsStimulus: true,
         choices, answerIndex, answer: meaning };
@@ -347,7 +352,21 @@ export function normalize(s: string): string {
  */
 const FORM_SEPARATOR = /[;；/／、,，]/;
 
+/**
+ * The response meaning "I don't know", as distinct from a wrong guess.
+ *
+ * Both grade Again, so the schedule is the same either way -- but without it a
+ * tutor driving the CLI conversationally has to submit some specific wrong
+ * choice to record the miss, which writes a fabricated answer into the review
+ * log and leaves the reason for the miss unrecoverable.
+ */
+export const DONT_KNOW = "?";
+
 export function checkAnswer(q: Question, response: string | number): boolean {
+  // Explicit, not incidental: `Number("?")` is NaN and would compare false on
+  // its own, but a sentinel that grades wrong only by accident is one refactor
+  // away from grading right.
+  if (String(response) === DONT_KNOW) return false;
   if (q.mode !== "production") return Number(response) === q.answerIndex;
 
   const given = normalize(String(response));
