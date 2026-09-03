@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
-import { distractors, homophoneGlosses, shortMeaning, productionPrompt, type Item } from "./bank";
+import { distractors, homophoneGlosses, displayGloss, productionPrompt, type Item } from "./bank";
 import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
 import { readingKey } from "./romaji";
 import { pickSentence, sentencesEnabled, decrementUnheardFor, type SentenceStimulus } from "./sentences";
@@ -312,7 +312,7 @@ export function buildQuestion(
   db: Database, item: Item, mode: Mode, isNew: boolean, rng: () => number = Math.random,
   sentence: SentenceStimulus | null = null,
 ): Question {
-  const meaning = shortMeaning(item.meaning);
+  const meaning = displayGloss(db, item);
   const base = {
     itemId: item.id, mode, level: item.level, isNew,
     section: MODE_SECTION[mode],
@@ -343,7 +343,7 @@ export function buildQuestion(
         const heard = sentence.itemIds.length
           ? db.query<{ meaning: string }, []>(
               `SELECT meaning FROM items WHERE id IN (${sentence.itemIds.join(",")})`)
-            .all().map((r) => shortMeaning(r.meaning))
+            .all().map((r) => displayGloss(db, r))
           : [];
         const { choices, answerIndex } = shuffleWithAnswer(
           meaning,

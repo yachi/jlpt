@@ -137,29 +137,55 @@ to its upstream CSV value first.
 
 ## Open
 
-### 6. `shortMeaning` truncation erases distinctions on 127 items (9.2%)
+### ~~6. shortMeaning truncation erased distinctions on 127 items~~ FIXED
 
-`shortMeaning()` takes everything before the first top-level comma or semicolon,
-and that is the only text a multiple-choice card ever shows. Measured across the
-bank: **60 gloss groups, 127 items (9.2%)**, where two different words collapse
-to the same short gloss *even though the source distinguishes them*. (Was 61
-groups / 130 items before the corrections above.)
+`shortMeaning()` took everything before the first top-level separator, and that
+was the only text a multiple-choice card ever showed. 薄い "thin, weak" and 細い
+"thin, slender, fine" both displayed **thin**; うち and 家庭 both **home**;
+こんな "such, like this" and そんな "such, like that" both **such**. The cards
+were answerable — different readings — but what they taught did not identify
+the word.
 
-Examples: 薄い "thin, weak" and 細い "thin, slender, fine" both show **"thin"**;
-うち "home; house; my place" and 家庭 "home; family" both show **"home"**;
-こんな "such, like this" and そんな "such, like that" both show **"such"** —
-so the card teaches nothing about which is which.
+**This was not a new design problem.** `productionPrompt()` already solved
+exactly this for production cards, by escalating to the full meaning when the
+short gloss named more than one item. Two functions, one problem, opposite
+halves of the app. The fix generalises that escalation and deletes the copy:
 
-This is not the same bug as the homophone one (fixed above): those words have
-*different readings*, so a card is still answerable. The damage is pedagogical —
-the learner is taught a gloss that does not identify the word.
+`displayGloss(db, item)` returns the shortest run of leading clauses that no
+other bank item shares. `productionPrompt` lost its own layer 1 and now handles
+only what no gloss can express — the part of speech.
 
-Not yet fixed because the shape of the fix is a real decision: lengthen
-`shortMeaning` when a collision exists (changes what every card shows),
-disambiguate only the colliding pairs the way `productionPrompt()` does, or
-correct the 60 groups by hand in `gloss-corrections.csv`. The third is the only
-one that improves the *teaching* rather than just the *labels*, and it is also
-the most work.
+Measured on the bank:
+
+| | before | after |
+|---|---|---|
+| items sharing a display gloss | 157 (11.3%) | **34 (2.5%)** |
+| unanswerable production prompts | 0 | **0** |
+| glosses that got longer | — | 100 (7.2%) |
+| mean gloss length | 10.2 chars | 11.0 chars |
+| `nextQuestion(listening)` | 0.74 ms | 0.79 ms |
+
+The 34 that remain have genuinely identical source glosses — 赤/赤い both "red",
+ええ/はい both "yes", 明日 read あした or あす. No gloss can separate those;
+`productionPrompt` tags the part of speech and accepts every member's reading.
+
+Three things worth keeping:
+
+- **The same rule renders answers AND distractors.** Escalating only the answer
+  would make the longest option the correct one. Verified: the answer is
+  uniquely the longest option in 22.3% of 2,768 built questions, against 25% by
+  chance — no tell.
+- **The index is fetched once per call site, not once per item.** The first
+  version called `displayGloss` per rival, so the full-bank production test
+  issued ~1.9M stamp queries and ran past two minutes. `glossIndex(db)` is
+  cached per database behind a 0.069 ms stamp; `sharing()` turns
+  `productionPrompt` from 1383 comparisons into one lookup. That test now runs
+  in 105 ms.
+- **One deliberate behaviour change.** `shortMeaning(", leading comma")` used to
+  return the whole string and now returns "leading comma", because
+  `glossClauses` drops the empty clause a leading separator makes. No bank gloss
+  starts with a separator (checked: 0 of 1384), so this only ever described
+  malformed input.
 
 ### 7. Carried over from the sentence-mode plan
 

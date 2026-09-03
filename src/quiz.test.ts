@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, existsSync, statSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, MODES, MODE_SECTION, setSetting } from "./db";
-import { seed, parseCsv, shortMeaning, distractors, loadFalseFriends, productionPrompt, type Item } from "./bank";
+import { seed, parseCsv, shortMeaning, glossClauses, distractors, loadFalseFriends, productionPrompt, type Item } from "./bank";
 import { buildQuestion, checkAnswer, grade, nextQuestion, ratingFor, normalize, humanInterval,
   parseModeWeights, modePriority, introducedByMode, DEFAULT_MODE_WEIGHTS, hasAudioStimulus, speakableReading } from "./quiz";
 import { synthesize, speak, play, cacheKey, pickMacVoice, pickAzureVoice, pickVoices,
@@ -39,7 +39,14 @@ describe("CSV parsing", () => {
     expect(shortMeaning("blue")).toBe("blue");
     expect(shortMeaning("to meet, to see")).toBe("to meet");
     expect(shortMeaning("a [thing, other]; b")).toBe("a [thing, other]");
-    expect(shortMeaning(", leading comma")).toBe(", leading comma");
+    // Behaviour change, 2026-09-03: glossClauses() drops the empty clause a
+    // leading separator produces, so this is now "leading comma" rather than
+    // the whole string. No bank gloss starts with a separator (checked: 0 of
+    // 1384), so this only ever described malformed input — and stripping the
+    // artifact is the better of the two answers.
+    expect(shortMeaning(", leading comma")).toBe("leading comma");
+    expect(glossClauses("a, b; c")).toEqual(["a", "b", "c"]);
+    expect(glossClauses("to dial (e.g., a number), to ring")).toEqual(["to dial (e.g., a number)", "to ring"]);
   });
 
   test("no choice text in the whole bank ends mid-bracket", () => {

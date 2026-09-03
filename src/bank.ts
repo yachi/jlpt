@@ -206,55 +206,153 @@ export async function loadFalseFriends(db: Database): Promise<{ loaded: number; 
 }
 
 /**
- * First English gloss only — CSV meanings are comma-joined lists.
+ * Split a CSV meaning into its top-level English glosses.
+ *
  * Separators inside brackets don't count, otherwise a gloss like
- * "to dial/call (e.g., a telephone number)" gets truncated to "to dial/call (e.g."
+ * "to dial/call (e.g., a telephone number)" splits at the wrong comma.
  */
-export function shortMeaning(meaning: string): string {
-  let depth = 0;
+export function glossClauses(meaning: string): string[] {
+  const out: string[] = [];
+  let depth = 0, start = 0;
   for (let i = 0; i < meaning.length; i++) {
     const ch = meaning[i]!;
     if (ch === "(" || ch === "[" || ch === "{") depth++;
     else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
     else if ((ch === "," || ch === ";") && depth === 0) {
-      const head = meaning.slice(0, i).trim();
-      if (head) return head;
+      const head = meaning.slice(start, i).trim();
+      if (head) out.push(head);
+      start = i + 1;
     }
   }
-  return meaning.trim();
+  const tail = meaning.slice(start).trim();
+  if (tail) out.push(tail);
+  return out.length ? out : [meaning.trim()];
+}
+
+/** First English gloss only. The k=1 case of glossClauses(). */
+export function shortMeaning(meaning: string): string {
+  return glossClauses(meaning)[0]!;
+}
+
+/**
+ * The gloss to SHOW for an item: the shortest run of leading clauses that no
+ * other word in the bank shares.
+ *
+ * The first clause alone is not enough. Measured over the bank, 157 of 1384
+ * items (11.3%) shared their first clause with a different word, and in 127 of
+ * those the source did distinguish them — the truncation threw the distinction
+ * away. 薄い "thin, weak" and 細い "thin, slender, fine" both showed **thin**;
+ * うち "home; house; my place" and 家庭 "home; family" both showed **home**;
+ * こんな "such, like this" and そんな "such, like that" both showed **such**.
+ * The card was answerable, but what it taught did not identify the word.
+ * Escalating drops that to 34 items (2.5%).
+ *
+ * Deterministic per item, and used for BOTH the answer and the distractors:
+ * escalating only the answer would make the longest option the correct one.
+ *
+ * The 34 that remain have genuinely identical source glosses — 赤/赤い both
+ * "red", ええ/はい both "yes", 明日 read あした or あす. No gloss can separate
+ * those; productionPrompt() tags the part of speech and accepts the rest.
+ */
+export function displayGloss(db: Database, item: { meaning: string }): string {
+  return glossIndex(db).display(item.meaning);
+}
+
+/**
+ * How many bank items share each leading-clause prefix.
+ *
+ * Cached per database: building it costs ~0.95 ms against 1384 items, which
+ * would be a 2.3x regression on nextQuestion's 0.74 ms. The stamp query is
+ * 0.069 ms. It counts rows and total gloss length, so it misses only an edit
+ * that preserves both — meanings are written by seed() and
+ * applyGlossCorrections() alone, and neither can do that.
+ */
+export interface GlossIndex {
+  /** The shortest run of leading clauses that no other item shares. */
+  display(meaning: string): string;
+  /** Ids of every OTHER item that ends up showing the same gloss. */
+  sharing(gloss: string, exceptId: number): number[];
+}
+
+const glossCache = new WeakMap<Database, { stamp: string; index: GlossIndex }>();
+
+/**
+ * Fetch the index ONCE per call site, not once per item.
+ *
+ * The stamp query is only 0.069 ms, but productionPrompt compares the target
+ * against every other item and distractors() renders a pool of ~700 — calling
+ * displayGloss() per row made the full-bank production test issue ~1.9M stamp
+ * queries and run for over two minutes. `sharing()` exists so productionPrompt
+ * is one lookup instead of 1383 comparisons.
+ */
+export function glossIndex(db: Database): GlossIndex {
+  const s = db.query<{ n: number; len: number }, []>(
+    "SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(meaning)), 0) AS len FROM items").get()!;
+  const stamp = `${s.n}:${s.len}`;
+  const hit = glossCache.get(db);
+  if (hit?.stamp === stamp) return hit.index;
+
+  const rows = db.query<{ id: number; meaning: string }, []>("SELECT id, meaning FROM items").all();
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const cl = glossClauses(r.meaning);
+    for (let k = 1; k <= cl.length; k++) {
+      const p = cl.slice(0, k).join(", ").toLowerCase();
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+  }
+  const display = (meaning: string): string => {
+    const cl = glossClauses(meaning);
+    for (let k = 1; k <= cl.length; k++) {
+      const p = cl.slice(0, k).join(", ");
+      if (counts.get(p.toLowerCase()) === 1) return p;
+    }
+    return meaning.trim();
+  };
+  const byDisplay = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = display(r.meaning).toLowerCase();
+    (byDisplay.get(k) ?? byDisplay.set(k, []).get(k)!).push(r.id);
+  }
+  const index: GlossIndex = {
+    display,
+    sharing: (gloss, exceptId) =>
+      (byDisplay.get(gloss.toLowerCase()) ?? []).filter((id) => id !== exceptId),
+  };
+  glossCache.set(db, { stamp, index });
+  return index;
 }
 
 /**
  * The prompt for a production card, and the readings it must also accept.
  *
  * A production card shows a gloss and asks for the reading, so the gloss has to
- * determine the answer. `shortMeaning` alone does not: 76 short glosses name
+ * determine the answer. The first clause alone does not: 76 short glosses named
  * more than one bank entry, making 161 of 1384 production cards (11.6%)
  * unanswerable — "red" is both 赤【あか】and 赤い【あかい】, and no amount of
  * knowing Japanese picks one. Found live, marking a correct answer wrong.
  *
- * Three layers, each doing only what it is good at:
- *   1. the full meaning, when the short one is ambiguous  — resolves 58 of 76
- *   2. an い-adjective tag, derived structurally (same expression and reading
+ * Two layers now, because displayGloss() absorbed the first one. It already
+ * returns the shortest gloss unique in the bank, so a prompt is ambiguous here
+ * only when NO gloss can separate the words — 34 of 1384 items:
+ *   1. an い-adjective tag, derived structurally (same expression and reading
  *      as another entry plus い) — resolves the noun/adjective pairs, which no
  *      gloss can separate because both really do mean "red"
- *   3. whatever is still tied is a genuine synonym set (あした/あす,
- *      在る/有る, あっち/そちら/そっち): accept every member's reading, since
- *      the question as posed has more than one correct answer.
+ *   2. whatever is still tied is a genuine synonym set (あした/あす,
+ *      在る/有る, ええ/はい): accept every member's reading, since the question
+ *      as posed has more than one correct answer.
  *
- * Layer 3 is the guarantee; 1 and 2 exist so the card still teaches something.
+ * Layer 2 is the guarantee; layer 1 exists so the card still teaches something.
  */
 export function productionPrompt(
   db: Database, item: Item,
 ): { prompt: string; alsoAccept: string[] } {
-  const short = shortMeaning(item.meaning);
-  const rivals = db
-    .query<Item, [number]>("SELECT * FROM items WHERE id != ?").all(item.id)
-    .filter((c) => shortMeaning(c.meaning).toLowerCase() === short.toLowerCase());
-  if (rivals.length === 0) return { prompt: short, alsoAccept: [] };
-
-  const stillTied = rivals.filter((c) => c.meaning.toLowerCase() === item.meaning.toLowerCase());
-  if (stillTied.length === 0) return { prompt: item.meaning, alsoAccept: [] };
+  const gi = glossIndex(db);
+  const gloss = gi.display(item.meaning);
+  const tiedIds = gi.sharing(gloss, item.id);
+  if (tiedIds.length === 0) return { prompt: gloss, alsoAccept: [] };
+  const stillTied = db
+    .query<Item, []>(`SELECT * FROM items WHERE id IN (${tiedIds.join(",")})`).all();
 
   // An い-adjective and the noun it is built on: 赤い/赤, 青い/青, 黄色い/黄色.
   const adjectiveOf = (a: Item, b: Item) =>
@@ -263,9 +361,9 @@ export function productionPrompt(
   const isBaseNoun = stillTied.some((c) => adjectiveOf(c, item));
   const remaining = stillTied.filter((c) => !adjectiveOf(item, c) && !adjectiveOf(c, item));
 
-  const prompt = isAdjective ? `${item.meaning} (い-adjective)`
-    : isBaseNoun ? `${item.meaning} (noun)`
-    : item.meaning;
+  const prompt = isAdjective ? `${gloss} (い-adjective)`
+    : isBaseNoun ? `${gloss} (noun)`
+    : gloss;
   return { prompt, alsoAccept: remaining.map((c) => c.reading) };
 }
 
@@ -300,7 +398,7 @@ export function homophoneGlosses(db: Database, item: Item): string[] {
     .query<{ meaning: string }, [string, number]>(
       "SELECT meaning FROM items WHERE reading = ? AND id != ?")
     .all(item.reading, item.id)
-    .map((r) => shortMeaning(r.meaning));
+    .map((r) => glossIndex(db).display(r.meaning));
 }
 
 export function distractors(
@@ -311,7 +409,8 @@ export function distractors(
   rng: () => number = Math.random,
   exclude: Iterable<string> = [],
 ): string[] {
-  const targetVal = field === "meaning" ? shortMeaning(target.meaning) : target.reading;
+  const gi = field === "meaning" ? glossIndex(db) : null;
+  const targetVal = gi ? gi.display(target.meaning) : target.reading;
   const pool = db
     .query<Item, [string, number]>(`SELECT * FROM items WHERE level = ? AND id != ? `)
     .all(target.level, target.id);
@@ -332,7 +431,7 @@ export function distractors(
   const candidates = pool
     .map((c) => ({ c, key: score(c) + rng() }))
     .sort((a, b) => b.key - a.key)
-    .map(({ c }) => (field === "meaning" ? shortMeaning(c.meaning) : c.reading));
+    .map(({ c }) => (gi ? gi.display(c.meaning) : c.reading));
 
   const out: string[] = [];
   for (const v of candidates) {
