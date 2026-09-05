@@ -114,9 +114,20 @@ async function cmdNext() {
     // The suggested value must be derived from the current limit, not a constant:
     // a hardcoded hint tells you to *lower* the limit once you have raised it.
     const limit = Number.parseInt(getSetting(db, "new_per_day", "5"), 10);
+    // "Come back tomorrow" is wrong whenever a card is due in minutes, which
+    // teach-first made the common case: introduceCard() schedules the first
+    // test INTRODUCE_DELAY_MS out, so finishing the daily new-card budget
+    // leaves a pile of taught-but-untested cards landing shortly.
+    const soonest = db.query<{ due: number }, [number]>(
+      "SELECT MIN(due) AS due FROM cards WHERE introduced = 1 AND due > ?").get(Date.now())?.due;
+    const wait = soonest ? humanInterval(soonest - Date.now()) : null;
     const msg = s.unseen > 0
-      ? `Nothing due. Daily new-card limit (${limit}) reached — come back tomorrow, or raise it: bun run cli set new_per_day ${limit + 4}`
-      : "Nothing due and every card introduced. Come back later.";
+      ? `Nothing due right now. Daily new-card limit (${limit}) reached`
+        + (wait ? ` — next card in ${wait}.` : " — come back tomorrow.")
+        + ` Raise the limit with: bun run cli set new_per_day ${limit + 4}`
+      : wait
+        ? `Nothing due right now; every card introduced. Next card in ${wait}.`
+        : "Nothing due and every card introduced. Come back later.";
     if (JSON_OUT) console.log(JSON.stringify({ question: null, reason: msg, ...s }));
     else console.log(C.yellow(msg));
     return;

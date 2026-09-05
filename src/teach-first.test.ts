@@ -245,3 +245,22 @@ test("a taught card always speaks the reading, whatever the mode would play", ()
   }
   db.close();
 });
+
+test("the nothing-due message names when the next card lands, not 'tomorrow'", () => {
+  // Teach-first made this the common case: spending the daily budget leaves a
+  // pile of taught-but-untested cards due in ten minutes, and telling the
+  // learner to come back tomorrow sends them away from work that is waiting.
+  const db = deck();
+  const T = 1_788_000_000_000;
+  for (let i = 0; i < 3; i++) {
+    const q = nextQuestion(db, { now: T, newLimit: 3 })!;
+    introduceCard(db, q.itemId, q.mode, T);
+  }
+  expect(nextQuestion(db, { now: T, newLimit: 3 })).toBeNull();
+  const soonest = db.query<{ due: number }, [number]>(
+    "SELECT MIN(due) AS due FROM cards WHERE introduced = 1 AND due > ?").get(T)!.due;
+  expect(soonest).toBe(T + INTRODUCE_DELAY_MS);
+  // ...and those cards really do become available once that delay passes.
+  expect(nextQuestion(db, { now: T + INTRODUCE_DELAY_MS, newLimit: 3 })).not.toBeNull();
+  db.close();
+});
