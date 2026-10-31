@@ -33,19 +33,29 @@ bun run seed          # load the item bank (once) — 1,384 words, 5,257 cards
 bun run study         # go
 ```
 
-No dependencies to install. No API key required — it falls back to the macOS `Kyoko` voice.
+No dependencies to install to study. No API key required — it falls back to the installed macOS
+Japanese voices. (`bun install` is only needed for `bun run typecheck`.)
+
+A new word is **taught before it is tested**: the first time a card comes up it shows (and speaks)
+the word with its reading and meaning, and the first real question lands about ten minutes later.
+Asking a never-seen word measures nothing — "I don't know" is the only honest answer — so it is
+not a review. Turn this off with `bun run cli set teach_new_first 0`; mock exams never teach.
 
 ## Commands
 
 ```fish
 bun run study --level n5 --mode listening --n 20
 bun run cli next                  # show the next due card
-bun run cli answer 3              # answer it (1-4, or type kana for production cards)
+bun run cli answer 3              # answer it (1-4, or type kana/romaji for production cards)
+bun run cli answer --dont-know    # "I don't know" — also `answer '?'`, or `?` at the study prompt
+bun run cli seen                  # acknowledge a new word that was taught rather than asked
 bun run cli exam --level n5       # mock exam scored against the real floors
 bun run cli stats                 # progress, weakest mode, TTS quota used
 bun run cli tts "おはようございます"
 bun run cli set new_per_day 8     # daily new-card limit (default 5)
-bun test                          # 32 tests
+bun run cli import-sentences      # load the sentence corpus (--check verifies without writing)
+bun test                          # the full suite; offline, no key needed
+bun run typecheck                 # tsc --noEmit
 ```
 
 ### Studying with Claude in this repo
@@ -58,6 +68,9 @@ bun run cli next --json
 bun run cli answer 2 --json
 ```
 
+"I don't know" is a first-class answer (`--dont-know`), graded as Again, so admitting it never means
+submitting a knowingly-wrong choice into the review log.
+
 ## The four modes
 
 Each `(word, mode)` pair is scheduled as its own FSRS card, so your listening can be weak while your
@@ -69,6 +82,9 @@ reading is strong and the scheduler responds to each independently.
 | `reading` | kanji → 4 kana readings | 漢字読み | Knowledge |
 | `listening` | **audio only** → 4 meanings | 聴解 | Listening |
 | `production` | English → type the kana | (none — deeper encoding) | Knowledge |
+
+`production` accepts Hepburn romaji as well as kana (`taberu`, `gakkou`), because without a Japanese
+IME a quarter of the bank would be unanswerable. Any accepted written form of the answer counts.
 
 ### If you already read Chinese
 
@@ -128,7 +144,8 @@ Ratings are derived from your answer, so there is no self-grading step:
 
 ## Azure Speech (optional)
 
-Without a key the CLI uses macOS `say -v Kyoko`. With one you get ja-JP neural voices.
+Without a key the CLI rotates the installed macOS ja_JP voices (`Kyoko,Eddy,Flo,Reed,Sandy,Shelley`;
+override with `MACOS_JA_VOICES=...`). With one you get ja-JP neural voices.
 
 ```fish
 cp .env.example .env
@@ -149,9 +166,27 @@ Free (F0) tier limits, all enforced client-side:
 Every clip is cached to `audio/`, so a word costs characters exactly **once**. Practical effect: the
 entire 1,384-word bank is roughly 4,000 characters — under **1%** of one month's free quota.
 
-Other ja-JP voices: `KeitaNeural`, `AoiNeural`, `DaichiNeural`, `MayuNeural`, `NaokiNeural`,
-`ShioriNeural`. Rotating voices is worth doing — a single voice is easier to understand than the
-multi-speaker audio on the real exam.
+Voices rotate per card, Azure included: by default eight ja-JP neural voices, four female and four
+male (`NanamiNeural`, `AoiNeural`, `MayuNeural`, `ShioriNeural`, `KeitaNeural`, `DaichiNeural`,
+`NaokiNeural`, `MasaruMultilingualNeural`; override with `AZURE_SPEECH_VOICES=a,b,c`). One speaker
+trains recall of a waveform, not discrimination of phonemes, and the real exam is multi-speaker.
+Setting `AZURE_SPEECH_VOICE` pins a single voice.
+
+## Sentences in listening (off by default)
+
+A `listening` card can play a whole Tatoeba sentence instead of the bare word, when every other word
+in that sentence is one you already know by ear (i+1). Same card, same FSRS state, same question —
+only the stimulus changes. The corpus is selected, never generated, and is attributed in
+`data/CREDITS.md`.
+
+```fish
+bun run cli import-sentences          # load data/sentences.json
+bun run cli set sentence_listening 1  # turn it on
+```
+
+It stays off until your known-by-ear vocabulary is deep enough for most cards to find a sentence.
+Once about half your introduced listening cards have one, `stats` and `study` print a one-time
+reminder to turn it on. Design, measurements and the review history: `.goal/sentence-mode-plan.md`.
 
 ## Calibrating against reality
 
@@ -172,22 +207,54 @@ end
 
 Swap `sample2018` for `sample2012` to get the second set. There are only two — don't burn them early.
 
+## Fixing bad data
+
+The CSVs are the external oracle and are never edited or regenerated from code. Corrections live
+beside them, each checked rather than trusted:
+
+- `data/gloss-corrections.csv` — overrides a wrong upstream gloss. Its `was` column names the
+  upstream value, so if upstream changes the row is reported **stale** and skipped instead of
+  silently re-breaking a fixed gloss.
+- `data/sentence-blacklist.txt` — Tatoeba sentence ids to drop; re-run `bun run cli import-sentences`.
+- `data/false-friends.txt` — see above.
+
+## Development
+
+```fish
+bun test             # whole suite, offline
+bun run typecheck    # needs `bun install` once, for typescript
+```
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs typecheck and the tests on every push
+and pull request. It sets no Azure key, and the TTS tests that need macOS `say` skip on Linux, so CI
+runs fully offline.
+
+Open work, and the evidence behind each fix already made, is in `.goal/ROADMAP.md`.
+
 ## Data & licences
 
 - Vocabulary: [open-anki-jlpt-decks](https://github.com/jamsinclair/open-anki-jlpt-decks) (MIT),
   derived from tanos.co.uk lists reconstructing the withdrawn 2004 出題基準. **Unofficial.**
 - Scheduler: FSRS-6 ported from [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) (MIT).
+- Sentences: [Tatoeba](https://tatoeba.org) (CC BY 2.0 FR); contributors are named in `data/CREDITS.md`.
 
 ## Layout
 
 ```
 src/fsrs.ts        FSRS-6 scheduler (port; differentially tested)
-src/fsrs.test.ts   golden-fixture test vs the reference implementation
 src/db.ts          SQLite schema (bun:sqlite)
-src/bank.ts        CSV loading, distractor selection
-src/tts.ts         Azure TTS + quota ledger + rate limit + macOS fallback
-src/quiz.ts        question generation, grading, scheduling glue
+src/bank.ts        CSV loading, distractor selection, gloss corrections
+src/tts.ts         Azure TTS + quota ledger + rate limit + voice rotation + macOS fallback
+src/quiz.ts        question generation, teach-first, grading, scheduling glue
+src/romaji.ts      romaji -> kana for production answers
+src/sentences.ts   sentence-stimulus import, selection and the turn-on reminder
 src/cli.ts         commands
-data/              item bank, golden fixture, study.db (gitignored)
+src/*.test.ts      tests (fsrs.test.ts is the golden-fixture test vs the reference)
+tools/             uv/bun scripts: FSRS fixture, sentence corpus build, coverage
+                   measurement and the phase-0 schedule simulation
+data/              item bank, corrections, false friends, sentence corpus + blacklist,
+                   golden fixtures, CREDITS.md, study.db (gitignored)
+.goal/             ROADMAP.md (open work, newest first) and the sentence-mode plan
+.github/           CI workflow
 audio/             TTS cache (gitignored)
 ```
