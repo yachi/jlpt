@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned to the version the suite was last verified with, so a bun
+          # release cannot change test results without a commit here.
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      # No AZURE_SPEECH_KEY is set, and the `say`-backed TTS tests skip on
+      # Linux, so the suite runs fully offline.
+      - run: bun test

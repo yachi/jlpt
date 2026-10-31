@@ -522,6 +522,9 @@ describe("scheduling integration", () => {
  * hence the explicit budgets below.
  */
 describe("TTS cache safety", () => {
+  // With Azure unset (see beforeAll), real synthesis needs macOS `say`. Linux
+  // CI has none, so those tests skip there instead of failing; Macs still run them.
+  const noSay = !Bun.which("say");
   // These tests synthesize for real. Pin them to the offline macOS provider:
   // with a key in the environment they would hit the network, spend Azure
   // quota, and — worse — silently test a different code path than on a machine
@@ -537,7 +540,7 @@ describe("TTS cache safety", () => {
     if (saved.region !== undefined) process.env.AZURE_SPEECH_REGION = saved.region;
   });
 
-  test("a zero-byte cache entry is treated as a miss, not served", async () => {
+  test.skipIf(noSay)("a zero-byte cache entry is treated as a miss, not served", async () => {
     // Regression: a synthesis that dies partway used to leave a 0-byte file
     // that every later lookup happily returned as a valid cache hit.
     const text = `キャッシュ試験${Date.now()}`;
@@ -554,7 +557,7 @@ describe("TTS cache safety", () => {
     rmSync(repaired!.path, { force: true });
   }, 30_000);
 
-  test("no .part temp files survive a successful synthesis", async () => {
+  test.skipIf(noSay)("no .part temp files survive a successful synthesis", async () => {
     const text = `一時ファイル試験${Date.now()}`;
     const r = await synthesize(text);
     expect(r).not.toBeNull();
@@ -562,7 +565,7 @@ describe("TTS cache safety", () => {
     rmSync(r!.path, { force: true });
   }, 30_000);
 
-  test("each voice gets its own cache entry", async () => {
+  test.skipIf(noSay)("each voice gets its own cache entry", async () => {
     // Regression: the cache key hardcoded the voice name, so switching voices
     // replayed the previous voice's clip — silently defeating the whole point
     // of rotating speakers.
