@@ -248,3 +248,41 @@ export function sentenceCoverage(db: Database): {
        AND s.n_unheard = (CASE WHEN c.state <> 'learning' THEN 0 ELSE 1 END)`).get()!.n;
   return { listening, withSentence, distinct };
 }
+
+/**
+ * Plan section 6: enable sentence stimuli once roughly half of listening cards
+ * have one. Below that, most listening reviews would still play the bare word,
+ * so turning it on changes little except the risk of forgetting it is on.
+ */
+export const SENTENCE_NUDGE_SHARE = 0.5;
+/** Set while the nudge has been shown for the current crossing; cleared below it. */
+export const SENTENCE_NUDGE_KEY = "sentence_nudge_shown";
+
+/**
+ * Whether to print the enable-sentences nudge, and what the shown flag should
+ * become. Pure so the once-per-crossing rule is testable without a CLI.
+ * Dropping back below the threshold (a reimport, a blacklist) clears the flag,
+ * so the next crossing is announced again rather than silently swallowed.
+ */
+export function sentenceNudge(s: {
+  enabled: boolean; listening: number; withSentence: number; shown: boolean;
+}): { show: boolean; shown: boolean } {
+  if (s.enabled) return { show: false, shown: s.shown };
+  const reached = s.listening > 0 && s.withSentence / s.listening >= SENTENCE_NUDGE_SHARE;
+  if (!reached) return { show: false, shown: false };
+  return { show: !s.shown, shown: true };
+}
+
+/**
+ * The one-line nudge if it is due, recording that it was shown. Callers must
+ * not call this on --json paths: it consumes the once-per-crossing flag.
+ */
+export function sentenceNudgeLine(db: Database): string | null {
+  const cov = sentenceCoverage(db);
+  const shown = getSetting(db, SENTENCE_NUDGE_KEY, "0") === "1";
+  const d = sentenceNudge({ enabled: sentencesEnabled(db), ...cov, shown });
+  if (d.shown !== shown) setSetting(db, SENTENCE_NUDGE_KEY, d.shown ? "1" : "0");
+  if (!d.show) return null;
+  const pct = Math.round((cov.withSentence / cov.listening) * 100);
+  return `${cov.withSentence}/${cov.listening} listening cards (${pct}%) now have a sentence. Enable with: bun run cli set ${SENTENCE_SETTING} 1`;
+}
