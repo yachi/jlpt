@@ -1,0 +1,51 @@
+name: Android
+
+# Builds the debug APK on every push so there is always an installable build
+# to download, without anyone needing the Android SDK locally. The Bun test
+# suite for the shared core runs in ci.yml; this workflow covers the app.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      # `build` typechecks the app and the ../src core it bundles, then runs Vite.
+      - run: npm run build
+      # Checks the bundle itself: sql-wasm.wasm present and valid, relative
+      # asset paths, no bun:/node: imports leaked in.
+      - run: npm test
+      # Copies dist/ into the Android project and regenerates the files that are
+      # gitignored there (assets/public, capacitor.plugins.json, cordova plugins),
+      # which is what registers the TTS, App and Filesystem plugins.
+      - run: npx cap sync android
+
+      # Capacitor 7's Android template compiles with Java 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      # ubuntu-latest ships the Android SDK (ANDROID_HOME) with licences
+      # accepted, so AGP can fetch any missing platform/build-tools itself.
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: app/android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jlpt-debug-apk
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

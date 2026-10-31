@@ -1,0 +1,12 @@
+{
+  "name": "JLPT Study",
+  "short_name": "JLPT",
+  "description": "Offline JLPT N5/N4 study: FSRS scheduling, listening practice, mock exams.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f5f2",
+  "theme_color": "#b3261e",
+  "icons": [{ "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

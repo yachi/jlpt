@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 23-25 have no adaptive icons. Instead of shipping PNGs per density, draw
+  the same two layers as a layer-list: VectorDrawable is native since API 21.
+  The glyph layer is the 72dp crop of the adaptive foreground.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/ic_launcher_background" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_launcher_legacy" />
+</layer-list>
