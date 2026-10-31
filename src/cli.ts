@@ -17,7 +17,7 @@ import {
 import { speak, synthesize, azureConfigured, readUsage, F0_MONTHLY_CHARS,
   pickVoices, MACOS_JA_VOICES, AZURE_JA_VOICES, type SpeakOptions } from "./tts";
 import { importSentences, sentenceCoverage, sentencesEnabled, unheardDrift,
-  SENTENCE_SETTING } from "./sentences";
+  sentenceNudgeLine, SENTENCE_SETTING } from "./sentences";
 
 const db = openDb();
 const argv = Bun.argv.slice(2);
@@ -236,6 +236,8 @@ async function cmdStudy() {
     : `macOS voices ${MACOS_JA_VOICES.join("/")} (set AZURE_SPEECH_KEY for neural voices)`}`));
   console.log(C.dim("Answer with 1-4, type kana for production cards, '?' if you don't know,"));
   console.log(C.dim("'r' to replay audio, 'q' to quit.\n"));
+  const nudge = sentenceNudgeLine(db);
+  if (nudge) console.log(C.yellow(`${nudge}\n`));
 
   let asked = 0, right = 0;
   while (asked < limit) {
@@ -410,6 +412,8 @@ async function cmdStats() {
     for (const b of byStim) {
       console.log(`  ${b.kind.padEnd(11)} ${String(b.n).padStart(5)} reviews  ${b.n ? Math.round((b.hard / b.n) * 100) : 0}% rated Hard`);
     }
+    const nudge = sentenceNudgeLine(db);
+    if (nudge) console.log(C.yellow(`  ${nudge}`));
   }
 
   const exams = db.query<any, []>("SELECT * FROM exams ORDER BY ts DESC LIMIT 5").all();
