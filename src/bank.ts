@@ -1,6 +1,7 @@
-import type { Database } from "bun:sqlite";
-import { join } from "node:path";
-import { ROOT, MODES, getSetting, setSetting } from "./db";
+import type { Db } from "./sqlite";
+import { MODES, getSetting, setSetting } from "./schema";
+import { sha256Hex } from "./sha256";
+import { readDataFile } from "./data-files";
 
 /** settings key holding the bank identity the loaded sentence links belong to. */
 export const BANK_FINGERPRINT_KEY = "bank_fingerprint";
@@ -62,11 +63,15 @@ export function parseCsv(text: string): string[][] {
  * Gloss is not part of bankFingerprint() (which hashes id/level/expression/
  * reading), so correcting one does NOT invalidate the sentence links.
  */
-export async function applyGlossCorrections(
-  db: Database,
-): Promise<{ applied: number; stale: string[]; missing: string[] }> {
-  const file = Bun.file(join(ROOT, "data", "gloss-corrections.csv"));
-  if (!(await file.exists())) return { applied: 0, stale: [], missing: [] };
+export async function applyGlossCorrections(db: Db): Promise<CorrectionResult> {
+  return applyGlossCorrectionsFrom(db, await readDataFile("gloss-corrections.csv"));
+}
+
+export interface CorrectionResult { applied: number; stale: string[]; missing: string[] }
+
+/** applyGlossCorrections() over the CSV text; `null` means there is no file. */
+export function applyGlossCorrectionsFrom(db: Db, csv: string | null): CorrectionResult {
+  if (csv === null) return { applied: 0, stale: [], missing: [] };
 
   const get = db.query<{ id: number; meaning: string }, [string, string, string]>(
     "SELECT id, meaning FROM items WHERE level = ? AND expression = ? AND reading = ?");
@@ -77,7 +82,7 @@ export async function applyGlossCorrections(
   // Skip `#` comments and the header by NAME, not by position: the file leads
   // with a comment block explaining how to revise a correction, so slicing off
   // "the first row" would drop a comment and feed the header in as data.
-  for (const cells of parseCsv(await file.text())) {
+  for (const cells of parseCsv(csv)) {
     if (cells.length < 5) continue;
     const first = cells[0]!.trim();
     if (first.startsWith("#") || first.toLowerCase() === "level") continue;
@@ -92,10 +97,39 @@ export async function applyGlossCorrections(
   return { applied, stale, missing };
 }
 
-export async function seed(
-  db: Database, now = Date.now(),
-): Promise<{ items: number; cards: number; droppedSentences: number;
-  corrections: { applied: number; stale: string[]; missing: string[] } }> {
+export async function seed(db: Db, now = Date.now()): Promise<SeedResult> {
+  const read = async (level: "N5" | "N4") => {
+    const text = await readDataFile(`${level.toLowerCase()}.csv`);
+    if (text === null) throw new Error(`Missing data/${level.toLowerCase()}.csv — run: bun run cli fetch-data`);
+    return text;
+  };
+  return seedFrom(db, {
+    n5: await read("N5"),
+    n4: await read("N4"),
+    glossCorrections: await readDataFile("gloss-corrections.csv"),
+    falseFriends: await readDataFile("false-friends.txt"),
+  }, now);
+}
+
+/**
+ * The bank's source texts. Order of n5 then n4 is load-bearing: item ids are
+ * assigned by INSERT order, and the sentence corpus is keyed to those ids.
+ */
+export interface BankFiles {
+  n5: string;
+  n4: string;
+  /** data/gloss-corrections.csv; null/absent = no corrections. */
+  glossCorrections?: string | null;
+  /** data/false-friends.txt; null/absent = none. */
+  falseFriends?: string | null;
+}
+
+export interface SeedResult {
+  items: number; cards: number; droppedSentences: number; corrections: CorrectionResult;
+}
+
+/** seed() over already-loaded file contents, so it runs where there is no filesystem. */
+export function seedFrom(db: Db, files: BankFiles, now = Date.now()): SeedResult {
   const insItem = db.query(
     `INSERT INTO items (level, expression, reading, meaning, has_kanji) VALUES (?,?,?,?,?)
      ON CONFLICT(level, expression, reading) DO NOTHING`,
@@ -115,18 +149,16 @@ export async function seed(
 
   const all: { level: string; cells: string[] }[] = [];
   for (const level of ["N5", "N4"] as const) {
-    const file = Bun.file(join(ROOT, "data", `${level.toLowerCase()}.csv`));
-    if (!(await file.exists())) throw new Error(`Missing data/${level.toLowerCase()}.csv — run: bun run cli fetch-data`);
-    const rows = parseCsv(await file.text());
+    const rows = parseCsv(level === "N5" ? files.n5 : files.n4);
     for (const cells of rows.slice(1)) if (cells.length >= 3) all.push({ level, cells });
   }
   tx(all);
 
   // Overrides run AFTER the insert: insItem is ON CONFLICT DO NOTHING, so an
   // existing row's gloss is never updated by re-seeding.
-  const corrections = await applyGlossCorrections(db);
+  const corrections = applyGlossCorrectionsFrom(db, files.glossCorrections ?? null);
 
-  await loadFalseFriends(db);
+  loadFalseFriendsFrom(db, files.falseFriends ?? null);
 
   const items = db.query<Item, []>("SELECT * FROM items").all();
   const cardTx = db.transaction(() => {
@@ -172,13 +204,15 @@ export async function seed(
  * `meaning` is deliberately excluded: editing a gloss does not change which
  * word an id names, and should not invalidate a corpus.
  */
-export function bankFingerprint(db: Database): string {
-  const h = new Bun.CryptoHasher("sha256");
+export function bankFingerprint(db: Db): string {
+  // One digest over the concatenation is the same bytes the old incremental
+  // Bun.CryptoHasher updates fed in, so every existing fingerprint still holds.
+  let input = "";
   for (const r of db.query<{ id: number; level: string; expression: string; reading: string }, []>(
     "SELECT id, level, expression, reading FROM items ORDER BY id").all()) {
-    h.update(`${r.id}|${r.level}|${r.expression}|${r.reading}\n`);
+    input += `${r.id}|${r.level}|${r.expression}|${r.reading}\n`;
   }
-  return h.digest("hex");
+  return sha256Hex(input);
 }
 
 /**
@@ -187,11 +221,15 @@ export function bankFingerprint(db: Database): string {
  * Entries that don't match any item are reported, so typos surface instead of
  * silently doing nothing.
  */
-export async function loadFalseFriends(db: Database): Promise<{ loaded: number; unmatched: string[] }> {
-  const file = Bun.file(join(ROOT, "data", "false-friends.txt"));
-  if (!(await file.exists())) return { loaded: 0, unmatched: [] };
+export async function loadFalseFriends(db: Db): Promise<{ loaded: number; unmatched: string[] }> {
+  return loadFalseFriendsFrom(db, await readDataFile("false-friends.txt"));
+}
 
-  const expressions = (await file.text())
+/** loadFalseFriends() over the file's text; `null` means there is no file. */
+export function loadFalseFriendsFrom(db: Db, text: string | null): { loaded: number; unmatched: string[] } {
+  if (text === null) return { loaded: 0, unmatched: [] };
+
+  const expressions = text
     .split("\n")
     .map((line) => line.split("#")[0]!.trim())
     .filter(Boolean);
@@ -254,7 +292,7 @@ export function shortMeaning(meaning: string): string {
  * "red", ええ/はい both "yes", 明日 read あした or あす. No gloss can separate
  * those; productionPrompt() tags the part of speech and accepts the rest.
  */
-export function displayGloss(db: Database, item: { meaning: string }): string {
+export function displayGloss(db: Db, item: { meaning: string }): string {
   return glossIndex(db).display(item.meaning);
 }
 
@@ -274,7 +312,7 @@ export interface GlossIndex {
   sharing(gloss: string, exceptId: number): number[];
 }
 
-const glossCache = new WeakMap<Database, { stamp: string; index: GlossIndex }>();
+const glossCache = new WeakMap<Db, { stamp: string; index: GlossIndex }>();
 
 /**
  * Fetch the index ONCE per call site, not once per item.
@@ -285,7 +323,7 @@ const glossCache = new WeakMap<Database, { stamp: string; index: GlossIndex }>()
  * queries and run for over two minutes. `sharing()` exists so productionPrompt
  * is one lookup instead of 1383 comparisons.
  */
-export function glossIndex(db: Database): GlossIndex {
+export function glossIndex(db: Db): GlossIndex {
   const s = db.query<{ n: number; len: number }, []>(
     "SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(meaning)), 0) AS len FROM items").get()!;
   const stamp = `${s.n}:${s.len}`;
@@ -345,7 +383,7 @@ export function glossIndex(db: Database): GlossIndex {
  * Layer 2 is the guarantee; layer 1 exists so the card still teaches something.
  */
 export function productionPrompt(
-  db: Database, item: Item,
+  db: Db, item: Item,
 ): { prompt: string; alsoAccept: string[] } {
   const gi = glossIndex(db);
   const gloss = gi.display(item.meaning);
@@ -393,7 +431,7 @@ export function productionPrompt(
  * on screen, which is exactly what tells the homophones apart -- there a
  * rival's gloss is the most instructive distractor in the bank, not a bug.
  */
-export function homophoneGlosses(db: Database, item: Item): string[] {
+export function homophoneGlosses(db: Db, item: Item): string[] {
   return db
     .query<{ meaning: string }, [string, number]>(
       "SELECT meaning FROM items WHERE reading = ? AND id != ?")
@@ -402,7 +440,7 @@ export function homophoneGlosses(db: Database, item: Item): string[] {
 }
 
 export function distractors(
-  db: Database,
+  db: Db,
   target: Item,
   field: "meaning" | "reading",
   n: number,

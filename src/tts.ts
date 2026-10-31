@@ -17,6 +17,7 @@
 import { mkdirSync, existsSync, statSync, rmSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./db";
+import { sha256Hex } from "./sha256";
 
 const AUDIO_DIR = join(ROOT, "audio");
 const USAGE_PATH = join(ROOT, "data", "tts-usage.json");
@@ -119,7 +120,7 @@ function escapeXml(s: string): string {
 
 /** Exported for tests: the key must include the voice, or clips cross-serve. */
 export function cacheKey(text: string, voice: string, rate: string): string {
-  return new Bun.CryptoHasher("sha256").update(`${voice}|${rate}|${text}`).digest("hex").slice(0, 20);
+  return sha256Hex(`${voice}|${rate}|${text}`).slice(0, 20);
 }
 
 export interface SpeakOptions {
