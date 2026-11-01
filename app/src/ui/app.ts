@@ -43,4 +43,19 @@ export function startApp(ctx: Ctx, root: HTMLElement): void {
 
   mount(root, main, nav);
   show("study");
+
+  // The learner leaves the app to install Japanese voice data and comes back.
+  // Re-ask the engine then, and redraw the current screen if the answer
+  // changed, so listening cards return without a restart.
+  let current = "study";
+  for (const [id, b] of buttons) b.addEventListener("click", () => { current = id; });
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible" || ctx.audio.ok) return;
+    const ok = await ctx.platform.canSpeak().catch(() => false);
+    if (ok && !ctx.audio.ok) {
+      ctx.audio.ok = true;
+      ctx.toast("Japanese voice found. Listening cards are back.");
+      show(current);
+    }
+  });
 }

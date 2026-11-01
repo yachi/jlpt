@@ -35,6 +35,20 @@
         </provider>
     </application>
 
+    <!-- Android 11+ package visibility: without these, an app targeting SDK 30+
+         cannot see any TTS engine, so TextToSpeech binds to nothing, lists no
+         voices and reports every language unsupported, even with Google's
+         Japanese voice installed. The second entry lets the "Install Japanese
+         voice data" button resolve the engine's voice-data screen. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.tts.engine.INSTALL_TTS_DATA" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
