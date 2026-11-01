@@ -119,10 +119,46 @@ h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; color: var(--muted); font-weight: 
 
 /* ------------------------------------------------------------ study */
 
+.today { margin-bottom: .9rem; }
 .session {
-  display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap;
-  font-size: .85rem; color: var(--muted); margin-bottom: .75rem;
+  display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap;
+  font-size: .85rem; color: var(--muted); margin-bottom: .4rem;
 }
+.today-count { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.today-right { display: inline-flex; align-items: center; gap: .6rem; }
+/* The day bar: transform only, so filling it never re-lays out the card. */
+.day-bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.day-fill {
+  height: 100%; background: var(--accent); border-radius: inherit;
+  transform-origin: left; transform: scaleX(0);
+  transition: transform .5s cubic-bezier(0.2, 0, 0, 1);
+}
+.streak {
+  display: inline-flex; align-items: center; gap: .2rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.streak .flame { filter: grayscale(1); opacity: .55; }
+.streak.lit { color: var(--warn); }
+.streak.lit .flame { filter: none; opacity: 1; }
+
+/* Done for today */
+.done { text-align: center; padding: 1.5rem 1rem 1.25rem; }
+.done h2 { font-size: 1.5rem; margin: .75rem 0 .25rem; color: var(--text); }
+.ring { width: 7.5rem; height: 7.5rem; margin: 0 auto; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 10; }
+.ring-bg { stroke: var(--surface-2); }
+.ring-fg { stroke: var(--ok); stroke-linecap: round; transition: stroke-dashoffset .9s cubic-bezier(0.2, 0, 0, 1); }
+.ring.full .ring-fg { stroke-dashoffset: 0; }
+.ring-check {
+  fill: none; stroke: var(--ok); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 1; stroke-dashoffset: 1; transform: rotate(90deg); transform-origin: 60px 60px;
+  transition: stroke-dashoffset .35s ease-out .75s;
+}
+.ring.full .ring-check { stroke-dashoffset: 0; }
+.stats { display: flex; justify-content: center; gap: .5rem 1.5rem; flex-wrap: wrap; margin: 1rem 0 .5rem; }
+.stat-v { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-l { font-size: .8rem; color: var(--muted); }
 .badge-row { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .5rem; }
 .badge {
   display: inline-block; font-size: .75rem; font-weight: 600; letter-spacing: .02em;
@@ -307,4 +343,11 @@ table.mix { width: 100%; border-collapse: collapse; }
 }
 .toast.error { background: var(--bad); color: var(--accent-text); border-radius: 12px; }
 
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Android's "Remove animations" maps here. Near-zero, not none, so end events
+   still fire; colour changes (how a verdict is read) stay. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: .01ms !important; transition-delay: 0s !important;
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+  }
+}

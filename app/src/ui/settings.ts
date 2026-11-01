@@ -6,6 +6,7 @@
  */
 import { getSetting, setSetting, MODES, type Mode } from "../../../src/schema";
 import { parseModeWeights } from "../../../src/quiz";
+import { APP_HAPTICS_KEY, APP_SOUND_KEY, APP_STREAK_KEY } from "./fx";
 import { h, mount } from "./dom";
 import { deliverBackup } from "../platform/share-backup";
 import { getLevel, getMode, setFilter, MODE_LABEL, type Ctx, type Level } from "./context";
@@ -141,6 +142,13 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
         toggle("Skip meaning cards for kanji", "For a kanji background: 秋 is a free point. False friends are still asked.",
           "skip_meaning_for_kanji", "0"),
         weights()),
+      h("h2", null, "Feedback"),
+      h("section", { class: "card" },
+        toggle("Show streak", "Days in a row you studied. A missed day is covered by a streak freeze.",
+          APP_STREAK_KEY, "1"),
+        toggle("Sounds", "A soft tone when you answer. Never plays over a spoken word.", APP_SOUND_KEY, "1"),
+        toggle("Vibration", "A short tick when you answer. Follows the phone's touch feedback setting.",
+          APP_HAPTICS_KEY, "1")),
       h("h2", null, "Audio"),
       h("section", { class: "card" }, voice),
       h("h2", null, "Data"),

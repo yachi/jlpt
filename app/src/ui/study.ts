@@ -6,12 +6,15 @@
  * time and draws. The one thing the app adds is pick.ts's rule that an
  * unplayable listening card is skipped rather than served silent.
  */
-import { grade, hasAudioStimulus, introduceCard, humanInterval, dueCount, DONT_KNOW,
+import { grade, hasAudioStimulus, introduceCard, humanInterval, DONT_KNOW,
   type Question, type GradeResult } from "../../../src/quiz";
 import { romajiToKana } from "../../../src/romaji";
 import { h, mount, revealBlock } from "./dom";
+import { getSetting, setSetting } from "../../../src/schema";
 import { getLevel, getMode, MODE_LABEL, type Ctx } from "./context";
 import { pickQuestion, nothingDue } from "./pick";
+import { todayPlan, streak, dueTomorrow, dayKey, type TodayPlan } from "./today";
+import { pop, shake, enter, countUp, celebrate, haptic, chime, APP_STREAK_KEY } from "./fx";
 
 /**
  * Thinking time for one card.
@@ -54,6 +57,11 @@ function focusIfPointer(el: HTMLElement): void {
 const RATE = 0.9;
 const RATE_SLOW = 0.8;
 
+/** Last drawn fill of the day bar, so a redraw animates from it, not from 0. */
+let lastFill = 0;
+/** settings key: the day (dayKey) the done screen last celebrated. */
+const CELEBRATED_KEY = "app_celebrated";
+
 export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
   let asked = 0, right = 0;
   let disposers: (() => void)[] = [];
@@ -67,11 +75,65 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
     return ok;
   }
 
+  /**
+   * Today as a finite task: "8 of 17 done", minutes left, and a bar that fills.
+   * The goal is the FSRS queue plus today's new words, never an invented
+   * number of points, so finishing it is exactly the work that helps memory.
+   */
   function header(): HTMLElement {
-    const s = dueCount(ctx.db);
-    return h("div", { class: "session" },
-      h("span", null, asked ? `${right}/${asked} correct` : "Ready"),
-      h("span", null, `${s.due} due · ${s.learned}/${s.total} introduced`));
+    const plan = todayPlan(ctx.db, Date.now(), planFilter());
+    const fill = h("div", { class: "day-fill" });
+    const el = h("div", { class: "today" },
+      h("div", { class: "session" },
+        h("span", { class: "today-count" }, todayLabel(plan)),
+        h("span", { class: "today-right" }, streakChip(), h("span", { class: "today-left" }, leftLabel(plan)))),
+      h("div", { class: "day-bar", role: "progressbar", "aria-label": "Today's study",
+        "aria-valuemin": "0", "aria-valuemax": String(plan.goal), "aria-valuenow": String(plan.done) }, fill));
+    setFill(fill, plan);
+    return el;
+  }
+
+  function planFilter() {
+    return { level: getLevel(ctx.db), mode: getMode(ctx.db), canHear: ctx.audio.ok };
+  }
+
+  function todayLabel(p: TodayPlan): string {
+    return p.goal ? `Today ${p.done} of ${p.goal}` : "Today";
+  }
+  function leftLabel(p: TodayPlan): string {
+    return p.remaining ? `~${p.minutesLeft} min left` : "Done";
+  }
+  function setFill(fill: HTMLElement, p: TodayPlan): void {
+    const to = p.goal ? p.done / p.goal : 0;
+    fill.style.transform = `scaleX(${lastFill})`;
+    // Next frame, so the transition runs from the last value to the new one.
+    requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.transform = `scaleX(${to})`; }));
+    lastFill = to;
+  }
+  function streakChip(): HTMLElement | null {
+    if (getSetting(ctx.db, APP_STREAK_KEY, "1") !== "1") return null;
+    const s = streak(ctx.db);
+    if (!s.days) return null;
+    return h("span", { class: `streak${s.today ? " lit" : ""}`,
+      title: s.today ? "Today counts" : "Study today to keep it going",
+      "aria-label": `${s.days} day streak${s.today ? "" : ", today not yet studied"}` },
+      h("span", { class: "flame", "aria-hidden": "true" }, "🔥"), String(s.days));
+  }
+
+  /** Update the header in place after an answer, so the bar animates. */
+  function refreshHeader(): void {
+    const old = root.querySelector<HTMLElement>(".today");
+    if (!old) return;
+    const p = todayPlan(ctx.db, Date.now(), planFilter());
+    old.querySelector(".today-count")!.textContent = todayLabel(p);
+    old.querySelector(".today-left")!.textContent = leftLabel(p);
+    old.querySelector(".streak")?.remove();
+    const chip = streakChip();
+    if (chip) old.querySelector(".today-right")!.prepend(chip);
+    const bar = old.querySelector<HTMLElement>(".day-bar")!;
+    bar.setAttribute("aria-valuemax", String(p.goal));
+    bar.setAttribute("aria-valuenow", String(p.done));
+    setFill(old.querySelector<HTMLElement>(".day-fill")!, p);
   }
 
   function audioNotice(waiting: number): HTMLElement | null {
@@ -93,6 +155,8 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
   }
 
   function emptyView(waiting: number): void {
+    const plan = todayPlan(ctx.db, Date.now(), planFilter());
+    if (plan.remaining === 0 && plan.done > 0) return doneView(plan, waiting);
     const n = nothingDue(ctx.db);
     // Wake up on our own when the next card lands soon: a taught word is due
     // ten minutes later, and making the learner guess when to tap is friction.
@@ -104,11 +168,75 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       header(), audioNotice(waiting),
       h("section", { class: "card empty" },
         h("h2", null, n.title),
-        h("p", { class: "muted" }, n.detail),
+        // Cards still to come today are relearning steps (a miss, or a word
+        // just taught): say that, so the wait reads as part of the plan.
+        h("p", { class: "muted" }, plan.remaining
+          ? `${plan.remaining} card${plan.remaining === 1 ? "" : "s"} come${plan.remaining === 1 ? "s" : ""} back later today for another try. The screen moves on by itself.`
+          : n.detail),
         asked ? h("p", { class: "summary" },
           `This session: ${right}/${asked} correct (${Math.round((right / asked) * 100)}%)`) : null),
       h("div", { class: "actions" },
         h("button", { class: "btn", type: "button", onclick: next }, "Check again")));
+  }
+
+  /**
+   * The day is finished: close it clearly (a ring that completes, today's
+   * numbers, what comes tomorrow). No "one more" button: extra reviews before
+   * they are due barely help memory, and a clear finish is the reward.
+   */
+  function doneView(plan: TodayPlan, waiting: number): void {
+    const now = Date.now();
+    const n = nothingDue(ctx.db, now);
+    const tomorrow = dueTomorrow(ctx.db, now);
+    const s = streak(ctx.db, now);
+    const showStreak = getSetting(ctx.db, APP_STREAK_KEY, "1") === "1" && s.days > 0;
+    const acc = plan.answered ? Math.round((plan.correct / plan.answered) * 100) : 0;
+    const mins = Math.max(1, Math.round(plan.studyMs / 60000));
+
+    const R = 52, C = 2 * Math.PI * R;
+    const ring = h("div", { class: "ring", "aria-hidden": "true" });
+    ring.innerHTML = `<svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="${R}"/>`
+      + `<circle class="ring-fg" cx="60" cy="60" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}"/>`
+      + `<path class="ring-check" d="M40 62 l14 14 l27 -30" pathLength="1"/></svg>`;
+
+    const stat = (value: number, label: string, fmt: (n: number) => string = String) => {
+      const v = h("div", { class: "stat-v" });
+      countUp(v, value, fmt);
+      return h("div", { class: "stat" }, v, h("div", { class: "stat-l" }, label));
+    };
+    const nextLine = tomorrow
+      ? `Tomorrow: ${tomorrow} card${tomorrow === 1 ? "" : "s"} due.`
+      : n.soonest ? `${n.title}.` : "Nothing scheduled yet.";
+
+    const card = h("section", { class: "card done" },
+      ring,
+      h("h2", null, "Done for today"),
+      h("p", { class: "muted" }, nextLine),
+      h("div", { class: "stats" },
+        stat(plan.answered + plan.taught, plan.taught ? `cards (${plan.taught} new)` : "cards"),
+        plan.answered ? stat(acc, "correct", (x) => `${x}%`) : null,
+        stat(mins, mins === 1 ? "minute" : "minutes"),
+        showStreak ? stat(s.days, "day streak") : null),
+      showStreak && s.freezes
+        ? h("p", { class: "muted small" },
+            `${s.freezes} streak freeze${s.freezes === 1 ? "" : "s"} saved: a missed day won't end your streak.`)
+        : null);
+    mount(root, header(), audioNotice(waiting), card,
+      h("div", { class: "actions" },
+        h("button", { class: "btn ghost", type: "button", onclick: next }, "Check again")));
+    enter(card);
+    // Draw the ring on the next frame so its stroke animates from empty.
+    requestAnimationFrame(() => requestAnimationFrame(() => ring.classList.add("full")));
+
+    // Celebrate once per day, and confetti only for a strong day: rewarding
+    // every finish makes the reward mean nothing.
+    const today = dayKey(now);
+    if (getSetting(ctx.db, CELEBRATED_KEY, "") !== today) {
+      setSetting(ctx.db, CELEBRATED_KEY, today);
+      ctx.save();
+      haptic(ctx.db, "confirm");
+      if (plan.answered >= 10 && acc >= 85) setTimeout(() => void celebrate().catch(() => {}), 450);
+    }
   }
 
   function badge(q: Question): HTMLElement {
@@ -129,6 +257,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       // so there is nothing to time here.
       const { due } = introduceCard(ctx.db, q.itemId, q.mode);
       ctx.save();
+      haptic(ctx.db, "tick");
       ctx.toast(`First test in ${humanInterval(due - Date.now())}`);
       next();
     } }, "Got it");
@@ -160,8 +289,8 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       const r = grade(ctx.db, q, response, clock.elapsed());
       ctx.save();
       asked++; if (r.correct) right++;
-      root.querySelector(".session")?.replaceWith(header());
       showResult(q, r, response);
+      refreshHeader();
     };
 
     const dontKnow = h("button", { class: "btn ghost", type: "button", onclick: () => submit(DONT_KNOW) },
@@ -246,6 +375,16 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
         else if (String(i) === response) b.classList.add("wrong");
       }
       if (input) { input.disabled = true; input.classList.add(r.correct ? "right" : "wrong"); }
+      // Motion, touch and sound together, at the moment of grading. "I don't
+      // know" is not an error, so it gets no shake and no buzz.
+      const picked = input ?? choiceButtons[Number(response)];
+      if (r.correct) { pop(picked); haptic(ctx.db, "confirm"); chime(ctx.db, true); }
+      else if (response !== DONT_KNOW) {
+        shake(picked); haptic(ctx.db, "reject");
+        // After a miss with audio, the slow spoken replay below is the signal;
+        // a tone on top of it would talk over the word.
+        if (!(q.audioText && ctx.audio.ok)) chime(ctx.db, false);
+      }
       const verdict = r.correct
         ? h("p", { class: "verdict ok" }, r.rating === 2 ? "Correct, but slow: rated Hard" : "Correct")
         : h("p", { class: "verdict bad" }, response === DONT_KNOW ? "Not yet: " : "Wrong: ",
@@ -253,6 +392,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       mount(feedback, h("div", { class: `result ${r.correct ? "ok" : "bad"}` },
         verdict, revealBlock(r.reveal),
         h("p", { class: "muted" }, `Next review in ${r.intervalHuman}`)));
+      enter(feedback.firstElementChild);
       const nextBtn = h("button", { class: "btn primary big", type: "button", onclick: next }, "Next");
       const replay = q.audioText && ctx.audio.ok
         ? h("button", { class: "btn ghost", type: "button", onclick: () => void say(q.audioText!, RATE_SLOW) }, "Play")
