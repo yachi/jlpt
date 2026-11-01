@@ -163,6 +163,7 @@ export async function openPlatform(o: OpenOptions): Promise<OpenedPlatform> {
     speak: (text, opts) => o.speech.speak(text, opts),
     canSpeak: () => o.speech.canSpeak(),
     openTtsSettings: () => o.speech.openSettings(),
+    voiceStatus: () => o.speech.describe(),
     async exportBackup() {
       await persister.flush();
       return db.export();

@@ -55,6 +55,9 @@ export interface Platform {
   /** Opens Android's TTS settings, where the Google Japanese voice data is installed. */
   openTtsSettings(): Promise<void>;
 
+  /** Why Japanese is or is not available, for the Settings screen; null when unknown. */
+  voiceStatus(): Promise<string | null>;
+
   /** The whole database as SQLite file bytes; share-backup.ts hands them to the user. */
   exportBackup(): Promise<Uint8Array>;
 

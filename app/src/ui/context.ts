@@ -30,6 +30,8 @@ export interface Ctx {
   /** Persist shortly, in the background; failures surface as a toast. */
   save(): void;
   toast(msg: string, kind?: "info" | "error"): void;
+  /** Open the phone's voice settings, or explain on screen why it could not. */
+  openVoiceSettings(): void;
 }
 
 export function makeCtx(platform: Platform, audioOk: boolean): Ctx {
@@ -50,6 +52,10 @@ export function makeCtx(platform: Platform, audioOk: boolean): Ctx {
       }, 400);
     },
     toast,
+    openVoiceSettings() {
+      platform.openTtsSettings().catch((e: unknown) =>
+        ctx.toast(`Could not open voice settings: ${e instanceof Error ? e.message : String(e)}`, "error"));
+    },
   };
   return ctx;
 }

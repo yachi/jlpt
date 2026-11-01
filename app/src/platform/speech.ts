@@ -5,6 +5,7 @@
  * exactly like the CLI's unheardCard().
  */
 import { TextToSpeech } from "@capacitor-community/text-to-speech";
+import { registerPlugin } from "@capacitor/core";
 import type { Speech } from "./speech-base";
 import type { SpeakOptions } from "./types";
 export type { Speech } from "./speech-base";
@@ -12,6 +13,30 @@ import { japaneseVoices, speakTimeoutMs, VoiceRotation, type VoiceInfo } from ".
 
 
 const DEFAULT_LANG = "ja-JP";
+
+/** Local plugin, android/app/src/main/java/io/github/yachi/jlpt/VoiceSettingsPlugin.java. */
+interface VoiceStatus {
+  initialized: boolean;
+  defaultEngine?: string;
+  engines: { name: string; label: string }[];
+  japanese: "available" | "missing-data" | "not-supported" | "no-engine";
+  error?: string;
+}
+const VoiceSettings = registerPlugin<{
+  open(): Promise<{ opened: string }>;
+  status(): Promise<VoiceStatus>;
+}>("VoiceSettings");
+
+export function describeVoiceStatus(s: VoiceStatus): string {
+  if (s.engines.length === 0) return "No text-to-speech engine is installed. Install Speech Services by Google from the Play Store.";
+  const engine = s.engines.find((e) => e.name === s.defaultEngine)?.label ?? s.defaultEngine ?? "unknown";
+  switch (s.japanese) {
+    case "available": return `Engine: ${engine}. Japanese is available.`;
+    case "missing-data": return `Engine: ${engine}. Japanese is supported but its voice data is not downloaded: open voice settings, tap the engine's gear, then Install voice data, then Japanese.`;
+    case "not-supported": return `Engine: ${engine} has no Japanese. In voice settings, choose Speech Services by Google as the preferred engine.`;
+    default: return `Engine: ${engine} did not start.`;
+  }
+}
 /** The CLI plays at -10%; same here so the two feel alike. */
 const DEFAULT_RATE = 0.9;
 
@@ -62,9 +87,14 @@ export function nativeSpeech(): Speech {
         speakTimeoutMs(text, rate));
     },
     async openSettings() {
-      // ACTION_INSTALL_TTS_DATA: the engine's own voice-data screen, where the
-      // Japanese pack is downloaded once and then works offline.
-      await TextToSpeech.openInstall().catch(() => {});
+      // Not TextToSpeech.openInstall(): it fires ACTION_CHECK_TTS_DATA, which
+      // shows no screen and silently does nothing when unresolved -- the
+      // button was dead on a real phone. The local plugin opens the system
+      // TTS screen and rejects if nothing opened.
+      await VoiceSettings.open();
+    },
+    async describe() {
+      try { return describeVoiceStatus(await VoiceSettings.status()); } catch { return null; }
     },
   };
 }
@@ -110,6 +140,7 @@ export function webSpeech(): Speech {
       synth.speak(u);
       return withTimeout(done, speakTimeoutMs(text, u.rate));
     },
-    async openSettings() { /* no browser API for this */ },
+    async openSettings() { throw new Error("A browser has no voice settings screen; install a Japanese voice in your OS settings."); },
+    async describe() { return null; },
   };
 }

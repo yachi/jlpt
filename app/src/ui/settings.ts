@@ -71,6 +71,7 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
   const voice = h("div", { class: "field" });
   async function renderVoice(): Promise<void> {
     const ok = await ctx.platform.canSpeak().catch(() => false);
+    const why = await ctx.platform.voiceStatus().catch(() => null);
     if (!alive) return;
     // A voice installed while the app was open should bring listening back
     // without a restart; Ctx.audio is otherwise only ever lowered.
@@ -79,6 +80,7 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
       h("span", { class: "field-l" }, "Japanese voice"),
       h("span", { class: "help" }, ok ? "Available. Listening cards and the mock exam are on."
         : "Not found. Listening cards are skipped until Google's Japanese voice data is installed."),
+      why ? h("span", { class: "help", "data-testid": "voice-status" }, why) : null,
       h("div", { class: "btn-row" },
         h("button", { type: "button", class: "btn", onclick: async () => {
           const played = await ctx.platform.speak("こんにちは。日本語の勉強を始めましょう。").catch(() => false);
@@ -86,7 +88,7 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
           ctx.toast(played ? "Voice works" : "No Japanese voice played", played ? "info" : "error");
           void renderVoice();
         } }, "Test voice"),
-        h("button", { type: "button", class: "btn ghost", onclick: () => void ctx.platform.openTtsSettings() },
+        h("button", { type: "button", class: "btn ghost", onclick: () => ctx.openVoiceSettings() },
           "Open voice settings")));
   }
 

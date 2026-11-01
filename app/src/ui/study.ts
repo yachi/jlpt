@@ -80,7 +80,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       h("p", null, h("strong", null, "No Japanese voice. "),
         "Listening cards are skipped, not served silent",
         waiting ? ` (${waiting} waiting).` : "."),
-      h("button", { class: "link", type: "button", onclick: () => void ctx.platform.openTtsSettings() },
+      h("button", { class: "link", type: "button", onclick: () => ctx.openVoiceSettings() },
         "Install Japanese voice data"));
   }
 
@@ -273,7 +273,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
           h("div", { class: "notice" },
             h("p", null, h("strong", null, "The audio did not play, "),
               "so this card was not graded. Answering it now would grade a guess."),
-            h("button", { class: "link", type: "button", onclick: () => void ctx.platform.openTtsSettings() },
+            h("button", { class: "link", type: "button", onclick: () => ctx.openVoiceSettings() },
               "Install Japanese voice data")),
           revealBlock(q.reveal)),
         h("div", { class: "actions" },

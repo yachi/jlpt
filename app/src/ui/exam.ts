@@ -42,7 +42,7 @@ export function examScreen(ctx: Ctx, root: HTMLElement): () => void {
       ctx.audio.ok ? null : h("div", { class: "notice" },
         h("p", null, h("strong", null, "Needs a Japanese voice. "),
           "A listening section nobody could hear would record a fabricated score."),
-        h("button", { class: "link", type: "button", onclick: () => void ctx.platform.openTtsSettings() },
+        h("button", { class: "link", type: "button", onclick: () => ctx.openVoiceSettings() },
           "Install Japanese voice data")),
       h("div", { class: "actions" },
         h("button", { class: "btn primary big", type: "button", disabled: !ctx.audio.ok, onclick: run }, "Start")));
@@ -115,7 +115,7 @@ export function examScreen(ctx: Ctx, root: HTMLElement): () => void {
         h("p", null, "The audio did not play, so nothing was recorded. A silent listening section would put a "
           + "fabricated score into the history the next sitting is compared against.")),
       h("div", { class: "actions" },
-        h("button", { class: "btn", type: "button", onclick: () => void ctx.platform.openTtsSettings() }, "Voice settings"),
+        h("button", { class: "btn", type: "button", onclick: () => ctx.openVoiceSettings() }, "Voice settings"),
         h("button", { class: "btn primary", type: "button", onclick: intro }, "Back")));
   }
 
