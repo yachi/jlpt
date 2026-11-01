@@ -47,7 +47,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           working-directory: app
-          script: adb install -r android/app/build/outputs/apk/debug/app-debug.apk && node e2e/emulator-voice.cjs; s=$?; adb logcat -d -t 400 "*:E" | grep -iE "jlpt|capacitor|chromium|AndroidRuntime" | tail -80; exit $s
+          script: adb install -r android/app/build/outputs/apk/debug/app-debug.apk && node e2e/emulator-voice.cjs
 
       - if: always()
         uses: actions/upload-artifact@v4

@@ -38,8 +38,17 @@ async function openApp(device) {
     try {
       const webview = await device.webView({ pkg: PKG }, { timeout: 30_000 });
       const page = await webview.page();
-      await page.waitForSelector("nav.tabbar", { timeout: 20_000 });
-      return page;
+      page.on("console", (m) => log(`console.${m.type()}: ${m.text()}`));
+      page.on("pageerror", (err) => log(`pageerror: ${err.message}`));
+      try {
+        await page.waitForSelector("nav.tabbar", { timeout: 20_000 });
+        return page;
+      } catch (e) {
+        // Say what IS on screen: a stuck splash, a startup error, or nothing.
+        const text = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 400) : "(no body)").catch(() => "(page gone)");
+        log(`screen text: ${String(text).replace(/\s+/g, " ")}`);
+        throw e;
+      }
     } catch (e) {
       last = e;
       log(`waiting for app UI: ${String(e && e.message || e).split("\n")[0]}`);
@@ -103,7 +112,11 @@ async function expectLeavesApp(device, page, button, name, shot) {
   try {
     const [device] = await android.devices();
     fs.writeFileSync(`${OUT}/failure.png`, await device.screenshot());
-    fs.writeFileSync(`${OUT}/logcat.txt`, (await device.shell("logcat -d -t 3000")).toString());
+    const lc = (await device.shell("logcat -d -t 5000")).toString();
+    fs.writeFileSync(`${OUT}/logcat.txt`, lc);
+    // Artifacts are not always reachable, so print the lines that explain a crash.
+    const keep = lc.split("\n").filter((l) => /FATAL|AndroidRuntime|Capacitor|chromium|Console|jlpt|lowmemorykiller|ANR|am_crash|WebView/i.test(l));
+    console.log("---- logcat (filtered) ----\n" + keep.slice(-150).join("\n"));
   } catch { /* nothing more to save */ }
   process.exit(1);
 });
