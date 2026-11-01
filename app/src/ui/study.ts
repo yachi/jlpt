@@ -14,7 +14,7 @@ import { getSetting, setSetting } from "../../../src/schema";
 import { getLevel, getMode, MODE_LABEL, type Ctx } from "./context";
 import { pickQuestion, nothingDue } from "./pick";
 import { todayPlan, streak, dueTomorrow, dayKey, type TodayPlan } from "./today";
-import { pop, shake, enter, countUp, celebrate, haptic, chime, APP_STREAK_KEY } from "./fx";
+import { pop, shake, enter, countUp, celebrate, haptic, chime, reducedMotion, APP_STREAK_KEY } from "./fx";
 
 /**
  * Thinking time for one card.
@@ -175,7 +175,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
           : n.detail),
         asked ? h("p", { class: "summary" },
           `This session: ${right}/${asked} correct (${Math.round((right / asked) * 100)}%)`) : null),
-      h("div", { class: "actions" },
+      h("div", { class: "actions sticky" },
         h("button", { class: "btn", type: "button", onclick: next }, "Check again")));
   }
 
@@ -222,7 +222,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
             `${s.freezes} streak freeze${s.freezes === 1 ? "" : "s"} saved: a missed day won't end your streak.`)
         : null);
     mount(root, header(), audioNotice(waiting), card,
-      h("div", { class: "actions" },
+      h("div", { class: "actions sticky" },
         h("button", { class: "btn ghost", type: "button", onclick: next }, "Check again")));
     enter(card);
     // Draw the ring on the next frame so its stroke animates from empty.
@@ -267,7 +267,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
         badge(q),
         h("p", { class: "instruction" }, "New word: study it. It will be tested in about ten minutes."),
         revealBlock(q.reveal)),
-      h("div", { class: "actions" }, play, got));
+      h("div", { class: "actions sticky" }, play, got));
     focusIfPointer(got);
     if (q.audioText) void say(q.audioText);
   }
@@ -279,7 +279,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
     disposers.push(() => clock.dispose());
     let answered = false;
     const feedback = h("div", { class: "feedback", "aria-live": "polite" });
-    const actions = h("div", { class: "actions" });
+    const actions = h("div", { class: "actions sticky" });
     const choiceButtons: HTMLButtonElement[] = [];
     const isJaChoice = q.mode === "reading";
 
@@ -393,6 +393,9 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
         verdict, revealBlock(r.reveal),
         h("p", { class: "muted" }, `Next review in ${r.intervalHuman}`)));
       enter(feedback.firstElementChild);
+      // The verdict lands below the choices, often under the fold on a phone.
+      // Bring it into view; Next stays reachable in the sticky action bar.
+      feedback.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
       const nextBtn = h("button", { class: "btn primary big", type: "button", onclick: next }, "Next");
       const replay = q.audioText && ctx.audio.ok
         ? h("button", { class: "btn ghost", type: "button", onclick: () => void say(q.audioText!, RATE_SLOW) }, "Play")
@@ -416,7 +419,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
             h("button", { class: "link", type: "button", onclick: () => ctx.openVoiceSettings() },
               "Install Japanese voice data")),
           revealBlock(q.reveal)),
-        h("div", { class: "actions" },
+        h("div", { class: "actions sticky" },
           h("button", { class: "btn primary big", type: "button", onclick: next }, "Continue without listening")));
     }
   }

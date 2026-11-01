@@ -27,7 +27,8 @@
   --warn-bg: #fff3d6;
   --focus: #1f5fbf;
   --radius: 14px;
-  --tap: 3.25rem;             /* >= 48dp touch target */
+  --tap: 3.25rem;
+  --tabbar-h: 3.9rem;          /* about .tabbar's height without its safe-area padding */             /* >= 48dp touch target */
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -232,6 +233,19 @@ h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; color: var(--muted); font-weight: 
 
 .actions { display: flex; gap: .6rem; flex-wrap: wrap; }
 .actions > .btn { flex: 1 1 8rem; }
+/* Study: the next action stays on screen above the tab bar, so a long verdict
+   never means scrolling down to find Next. The fade keeps text readable as it
+   slides under. --tabbar-h matches .tabbar's rendered height. */
+.actions.sticky {
+  /* Pinned to the bottom edge and padded past the tab bar (which sits on top),
+     so no strip of scrolling text shows between the two at any font size. */
+  position: sticky; bottom: 0; z-index: 5;
+  margin: 0 -1rem calc(-1 * (var(--safe-b) + var(--tabbar-h)));
+  padding: 1rem 1rem calc(var(--safe-b) + var(--tabbar-h) + .75rem);
+  background: linear-gradient(to bottom, transparent, var(--bg) 1rem);
+}
+/* scrollIntoView on the verdict stops above the sticky bar, not under it. */
+.feedback { scroll-margin-bottom: calc(var(--safe-b) + var(--tabbar-h) + 6rem); scroll-margin-top: 1rem; }
 
 .btn {
   min-height: var(--tap); padding: .5rem 1rem;
