@@ -25,13 +25,28 @@ async function resumed(device) {
   return m ? `${m[1]}/${m[2]}` : "unknown";
 }
 
+/**
+ * The WebView's first page can be replaced while Capacitor boots, which closes
+ * the Playwright page we attached to, so keep re-attaching until the app's
+ * tab bar is up. First launch also seeds 5,257 cards, slow on an emulator.
+ */
 async function openApp(device) {
   await device.shell(`am start -W -n ${PKG}/.MainActivity`);
-  const webview = await device.webView({ pkg: PKG }, { timeout: 60_000 });
-  const page = await webview.page();
-  // First launch seeds 5,257 cards; give it time.
-  await page.waitForSelector("nav.tabbar", { timeout: 90_000 });
-  return page;
+  const deadline = Date.now() + 180_000;
+  let last;
+  while (Date.now() < deadline) {
+    try {
+      const webview = await device.webView({ pkg: PKG }, { timeout: 30_000 });
+      const page = await webview.page();
+      await page.waitForSelector("nav.tabbar", { timeout: 20_000 });
+      return page;
+    } catch (e) {
+      last = e;
+      log(`waiting for app UI: ${String(e && e.message || e).split("\n")[0]}`);
+      await sleep(2000);
+    }
+  }
+  throw last;
 }
 
 /** Tap `button` and assert Android moved some other activity to the front. */
@@ -82,4 +97,13 @@ async function expectLeavesApp(device, page, button, name, shot) {
   }
   log("PASS");
   await device.close();
-})().catch((e) => { log(`FAIL: ${e && e.stack || e}`); process.exit(1); });
+})().catch(async (e) => {
+  log(`FAIL: ${e && e.stack || e}`);
+  // On failure, keep what explains it: the screen and the app's own log.
+  try {
+    const [device] = await android.devices();
+    fs.writeFileSync(`${OUT}/failure.png`, await device.screenshot());
+    fs.writeFileSync(`${OUT}/logcat.txt`, (await device.shell("logcat -d -t 3000")).toString());
+  } catch { /* nothing more to save */ }
+  process.exit(1);
+});
