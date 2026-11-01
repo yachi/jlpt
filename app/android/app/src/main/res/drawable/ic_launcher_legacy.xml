@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive foreground cropped to its visible 72dp (18dp off each side), for
+  the pre-API-26 icons in mipmap-anydpi, which are drawn unmasked at full size.
+  Same path as ic_launcher_foreground.xml; keep the two in sync.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp"
+    android:height="72dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <group
+        android:translateX="-18"
+        android:translateY="-18">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M42.08 40.85 41.93 40.55Q40.63 37.15 38.39 33.58L41.88 32.06Q44 34.93 46.03 39.52L42.53 40.85H59.93Q63.27 36.23 65.62 31.39L69.49 33.13Q66.97 37.35 64.17 40.85H74.75V51.83H71.08V44.02H37.02V51.83H33.35V40.85ZM55.96 58.12V60.02H77V63.28H56.21V72.47Q56.21 76.61 51.09 76.61Q47 76.61 43.43 76.11L42.71 72.17Q46.65 72.99 50.37 72.99Q52.37 72.99 52.37 71.1V63.28H31V60.02H52.17V56.32L52.42 56.22Q56.88 54.52 61.33 51.83H40.16V48.61H66.42L68.51 50.66Q63.1 54.75 55.96 58.12ZM52.56 40.67Q51.07 36.38 49 32.91L52.47 31.44Q54.61 34.68 56.41 39.25Z" />
+    </group>
+</vector>

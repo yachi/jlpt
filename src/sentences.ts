@@ -16,15 +16,15 @@
  * nothing here re-derives the mapping. src/sentences.test.ts is what guards it
  * from drifting against the bank.
  */
-import type { Database } from "bun:sqlite";
-import { join } from "node:path";
-import { ROOT, getSetting, setSetting } from "./db";
+import type { Db } from "./sqlite";
+import { getSetting, setSetting } from "./schema";
+import { readDataFile, readPath } from "./data-files";
 import { bankFingerprint, BANK_FINGERPRINT_KEY } from "./bank";
 
 /** Off by default: the corpus only covers ~half of listening cards by day 30. */
 export const SENTENCE_SETTING = "sentence_listening";
 
-export function sentencesEnabled(db: Database): boolean {
+export function sentencesEnabled(db: Db): boolean {
   return getSetting(db, SENTENCE_SETTING, "0") === "1";
 }
 
@@ -70,7 +70,7 @@ export const ROTATION = 5;
  * unheard, so a total of one unheard word entails that word IS the target.
  */
 export function pickSentence(
-  db: Database, itemId: number, targetKnown: boolean, rng: () => number = Math.random,
+  db: Db, itemId: number, targetKnown: boolean, rng: () => number = Math.random,
 ): SentenceStimulus | null {
   const rows = db.query<{ id: number; ja: string; en: string }, [number, number, number]>(
     `SELECT s.id, s.ja, s.en
@@ -94,7 +94,7 @@ export function pickSentence(
  * simply stops being offered and nothing ever reports it. Returns the number of
  * sentences touched so callers can assert on it.
  */
-export function decrementUnheardFor(db: Database, itemId: number): number {
+export function decrementUnheardFor(db: Db, itemId: number): number {
   return db.query(
     `UPDATE sentences SET n_unheard = n_unheard - 1
       WHERE n_unheard > 0
@@ -106,7 +106,7 @@ export function decrementUnheardFor(db: Database, itemId: number): number {
  * Rebuild n_unheard from the current cards state. Idempotent, and the repair
  * path if a decrement is ever missed.
  */
-export function recomputeUnheard(db: Database): void {
+export function recomputeUnheard(db: Db): void {
   db.exec(`
     UPDATE sentences SET n_unheard = (
       SELECT COUNT(*) FROM sentence_items si
@@ -116,7 +116,7 @@ export function recomputeUnheard(db: Database): void {
 }
 
 /** Sentences whose stored n_unheard disagrees with the cards table. */
-export function unheardDrift(db: Database): { id: number; stored: number; actual: number }[] {
+export function unheardDrift(db: Db): { id: number; stored: number; actual: number }[] {
   return db.query<{ id: number; stored: number; actual: number }, []>(`
     SELECT s.id, s.n_unheard AS stored,
            (SELECT COUNT(*) FROM sentence_items si
@@ -126,7 +126,7 @@ export function unheardDrift(db: Database): { id: number; stored: number; actual
       FROM sentences s`).all().filter((r) => r.stored !== r.actual);
 }
 
-interface CorpusSentence {
+export interface CorpusSentence {
   id: number; ja: string; en: string; author: string | null;
   items: number[]; ambiguous: number[];
 }
@@ -146,14 +146,34 @@ export interface ImportResult {
  * individual sentences -- Tatoeba quality is uneven and the ids are kept
  * precisely so a bad one can be named.
  */
-export async function importSentences(
-  db: Database, corpusPath = join(ROOT, "data", "sentences.json"),
-): Promise<ImportResult> {
-  const corpus: CorpusSentence[] = await Bun.file(corpusPath).json();
+export async function importSentences(db: Db, corpusPath?: string): Promise<ImportResult> {
+  const corpus = corpusPath === undefined ? await readDataFile("sentences.json") : await readPath(corpusPath);
+  if (corpus === null) throw new Error("Missing data/sentences.json");
+  const expected = await readDataFile("sentences-bank.json");
+  if (expected === null) throw new Error("Missing data/sentences-bank.json");
+  return importSentencesFrom(db, {
+    corpus: JSON.parse(corpus) as CorpusSentence[],
+    blacklist: await readDataFile("sentence-blacklist.txt"),
+    expected: JSON.parse(expected) as SentenceBank,
+  });
+}
 
-  const blFile = Bun.file(join(ROOT, "data", "sentence-blacklist.txt"));
+/** data/sentences-bank.json: the bank identity the corpus was built against. */
+export interface SentenceBank { items: number; fingerprint: string }
+
+/** importSentences()'s inputs, already loaded (parsed JSON, blacklist as text). */
+export interface SentenceFiles {
+  corpus: CorpusSentence[];
+  /** data/sentence-blacklist.txt; null/absent = nothing blacklisted. */
+  blacklist?: string | null;
+  expected: SentenceBank;
+}
+
+/** importSentences() over loaded contents, so it runs where there is no filesystem. */
+export function importSentencesFrom(db: Db, files: SentenceFiles): ImportResult {
+  const corpus = files.corpus;
   const blacklist = new Set<number>(
-    (await blFile.exists() ? await blFile.text() : "")
+    (files.blacklist ?? "")
       .split("\n").map((l) => Number.parseInt(l.split("#")[0]!.trim(), 10))
       .filter((n) => Number.isInteger(n)),
   );
@@ -171,8 +191,7 @@ export async function importSentences(
   const bank = bankFingerprint(db);
   const items = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM items").get()!.n;
   if (items === 0) throw new Error("No items in the bank — run `bun run seed` first.");
-  const expected = (await Bun.file(join(ROOT, "data", "sentences-bank.json")).json()) as
-    { items: number; fingerprint: string };
+  const expected = files.expected;
   if (bank !== expected.fingerprint) {
     throw new Error(
       `This database's item bank is not the one data/sentences.json was built against.\n` +
@@ -228,7 +247,7 @@ export async function importSentences(
  * How much of the listening deck currently has a sentence available.
  * The premise of this whole feature is corpus coverage, so it stays measured.
  */
-export function sentenceCoverage(db: Database): {
+export function sentenceCoverage(db: Db): {
   listening: number; withSentence: number; distinct: number;
 } {
   const eligible = `
@@ -277,7 +296,7 @@ export function sentenceNudge(s: {
  * The one-line nudge if it is due, recording that it was shown. Callers must
  * not call this on --json paths: it consumes the once-per-crossing flag.
  */
-export function sentenceNudgeLine(db: Database): string | null {
+export function sentenceNudgeLine(db: Db): string | null {
   const cov = sentenceCoverage(db);
   const shown = getSetting(db, SENTENCE_NUDGE_KEY, "0") === "1";
   const d = sentenceNudge({ enabled: sentencesEnabled(db), ...cov, shown });

@@ -1,0 +1,26 @@
+{
+  // Typechecks the app AND the core modules it imports from ../src. The strict
+  // flags match ../tsconfig.json on purpose: the core is written against them
+  // (e.g. `rows[i]!` under noUncheckedIndexedAccess), and a looser config here
+  // would hide nothing but a stricter one would reject working code.
+  //
+  // No bun-types: that is the point. If a core module reachable from the app
+  // touches `Bun`, `process` or a node:/bun: import, this typecheck fails.
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client"],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}

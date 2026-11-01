@@ -1,7 +1,7 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "./sqlite";
 import { Scheduler, newCard, type Card, type Rating } from "./fsrs";
 import { distractors, homophoneGlosses, displayGloss, productionPrompt, type Item } from "./bank";
-import { MODES, MODE_SECTION, getSetting, type Mode } from "./db";
+import { MODES, MODE_SECTION, getSetting, type Mode } from "./schema";
 import { readingKey } from "./romaji";
 import { pickSentence, sentencesEnabled, decrementUnheardFor, type SentenceStimulus } from "./sentences";
 
@@ -52,7 +52,7 @@ export function modePriority(
   });
 }
 
-export function introducedByMode(db: Database): Record<Mode, number> {
+export function introducedByMode(db: Db): Record<Mode, number> {
   // Annotated, NOT `as` — the cast would let a newly added mode compile with an
   // undefined count, and modePriority sums these: one undefined turns `total`
   // into NaN, every deficit into NaN, and the sort silently collapses to
@@ -130,7 +130,7 @@ function toCard(r: CardRow): Card {
   };
 }
 
-export function dueCount(db: Database, now = Date.now()) {
+export function dueCount(db: Db, now = Date.now()) {
   const due = db.query<{ n: number }, [number]>(
     "SELECT COUNT(*) AS n FROM cards WHERE introduced = 1 AND due <= ?").get(now)!.n;
   const learned = db.query<{ n: number }, []>(
@@ -139,7 +139,7 @@ export function dueCount(db: Database, now = Date.now()) {
   return { due, learned, total, unseen: total - learned };
 }
 
-function newIntroducedToday(db: Database, now = Date.now()): number {
+function newIntroducedToday(db: Db, now = Date.now()): number {
   const startOfDay = new Date(now).setHours(0, 0, 0, 0);
   // cards.introduced_at, not the review log: the budget is spent when a word is
   // SHOWN, and with teach-first a card can be introduced today and not tested
@@ -174,7 +174,7 @@ export const INTRODUCE_DELAY_MS = 600_000;
  * no special case.
  */
 export function introduceCard(
-  db: Database, itemId: number, mode: Mode, now = Date.now(),
+  db: Db, itemId: number, mode: Mode, now = Date.now(),
 ): { due: number } {
   const due = now + INTRODUCE_DELAY_MS;
   db.query(
@@ -211,7 +211,7 @@ export interface NextOptions {
  * Pick the next card: most-overdue review first, otherwise introduce a new card
  * if under today's new limit. Returns null when nothing is due.
  */
-export function nextQuestion(db: Database, opts: NextOptions = {}): Question | null {
+export function nextQuestion(db: Db, opts: NextOptions = {}): Question | null {
   const now = opts.now ?? Date.now();
   const rng = opts.rng ?? Math.random;
   const level = opts.level ?? "both";
@@ -309,7 +309,7 @@ function shuffleWithAnswer(answer: string, wrong: string[], rng: () => number) {
 }
 
 export function buildQuestion(
-  db: Database, item: Item, mode: Mode, isNew: boolean, rng: () => number = Math.random,
+  db: Db, item: Item, mode: Mode, isNew: boolean, rng: () => number = Math.random,
   sentence: SentenceStimulus | null = null,
 ): Question {
   const meaning = displayGloss(db, item);
@@ -502,7 +502,7 @@ export interface GradeResult {
 }
 
 export function grade(
-  db: Database, q: Question, response: string | number, elapsedMs = 0,
+  db: Db, q: Question, response: string | number, elapsedMs = 0,
   opts: { now?: number; easy?: boolean; rng?: () => number } = {},
 ): GradeResult {
   const now = opts.now ?? Date.now();

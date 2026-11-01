@@ -1,0 +1,4 @@
+[test]
+# app/test holds node:test checks of the BUILT app (npm test in app/); keep
+# bun test to the core suite so it never depends on whether dist/ exists.
+root = "src"

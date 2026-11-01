@@ -1,0 +1,56 @@
+name: Android emulator
+
+# Installs the debug APK on an emulator and taps the voice buttons, checking
+# Android's foreground activity, because a browser test cannot see whether a
+# native intent opened anything. Screenshots and the log are uploaded.
+
+on:
+  push:
+    paths: ["app/**", "src/**", "data/**", ".github/workflows/android-emulator.yml"]
+  pull_request:
+    paths: ["app/**", "src/**", "data/**", ".github/workflows/android-emulator.yml"]
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci && npm run build && npx cap sync android
+        working-directory: app
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: app/android
+      - run: npm install --no-save playwright@1.56.1
+        working-directory: app
+
+      # Hardware acceleration for the emulator on GitHub's Linux runners.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          working-directory: app
+          script: adb install -r android/app/build/outputs/apk/debug/app-debug.apk && node e2e/emulator-voice.cjs
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-voice-check
+          path: app/e2e-out/
