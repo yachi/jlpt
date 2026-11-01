@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // Local plugins must be registered before the bridge starts.
         registerPlugin(VoiceSettingsPlugin.class);
+        registerPlugin(FeedbackPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
