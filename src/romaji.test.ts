@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { foldKana, readingKey, romajiToKana } from "./romaji";
+import { foldKana, kanaToRomaji, readingKey, romajiToKana } from "./romaji";
 import { openDb } from "./db";
 import { seed } from "./bank";
 
@@ -155,5 +155,41 @@ describe("kana input is not re-interpreted as romaji", () => {
     // ...and a single あ must still NOT match ああ, or the long vowel stops
     // being a distinction the card can test.
     expect(readingKey("a")).not.toBe(readingKey("ああ"));
+  });
+});
+
+describe("kanaToRomaji", () => {
+  test.each([
+    ["とうきょう", "toukyou"],     // long vowels spelled as the kana are
+    ["コーヒー", "koohii"],        // ー repeats the vowel
+    ["きんようび", "kin'youbi"],   // ん before y reads apart
+    ["しんぶん", "shinbun"],
+    ["まっちゃ", "matcha"],        // っ before ch is t
+    ["がっこう", "gakkou"],
+    ["ちょっと", "chotto"],
+    ["ジュース", "juusu"],
+    ["パーティー", "paatii"],
+    ["ファックス", "fakkusu"],
+    ["にゅうがく", "nyuugaku"],
+    ["～く", "~ku"],
+    ["いい; よい", "ii; yoi"],
+  ])("%s -> %s", (kana, romaji) => {
+    expect(kanaToRomaji(kana)).toBe(romaji);
+  });
+
+  test("every bank reading round-trips through the romaji input", async () => {
+    // What the card shows must be something the production card accepts, or
+    // the learner is shown a spelling they then get marked wrong for.
+    const db = openDb(":memory:");
+    await seed(db);
+    const rows = db.query<{ reading: string }, []>("SELECT DISTINCT reading FROM items").all();
+    const broken = rows.map((r) => r.reading)
+      .filter((r) => !/[～〜;]/.test(r))
+      .filter((r) => readingKey(kanaToRomaji(r)) !== readingKey(r))
+      .map((r) => `${r} -> ${kanaToRomaji(r)}`);
+    expect({ broken }).toEqual({ broken: [] });
+    // And nothing kana is left untranslated.
+    const leftover = rows.map((r) => kanaToRomaji(r.reading)).filter((s) => /[぀-ヿ]/.test(s));
+    expect({ leftover }).toEqual({ leftover: [] });
   });
 });

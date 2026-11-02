@@ -7,6 +7,7 @@
 import { getSetting, setSetting, MODES, type Mode } from "../../../src/schema";
 import { parseModeWeights } from "../../../src/quiz";
 import { APP_HAPTICS_KEY, APP_SOUND_KEY, APP_STREAK_KEY } from "./fx";
+import { APP_CANTONESE_KEY, APP_ROMAJI_KEY } from "./extras";
 import { h, mount } from "./dom";
 import { deliverBackup } from "../platform/share-backup";
 import { getLevel, getMode, setFilter, MODE_LABEL, type Ctx, type Level } from "./context";
@@ -142,6 +143,12 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
         toggle("Skip meaning cards for kanji", "For a kanji background: 秋 is a free point. False friends are still asked.",
           "skip_meaning_for_kanji", "0"),
         weights()),
+      h("h2", null, "Word details"),
+      h("section", { class: "card" },
+        toggle("Romaji", "The reading in Roman letters, e.g. たべる → taberu. Spelled the way the answer box accepts it.",
+          APP_ROMAJI_KEY, "1"),
+        toggle("廣東話 Cantonese", "The meaning in Hong Kong Cantonese, under the English, e.g. 食 for 食べる.",
+          APP_CANTONESE_KEY, "1")),
       h("h2", null, "Feedback"),
       h("section", { class: "card" },
         toggle("Show streak", "Days in a row you studied. A missed day is covered by a streak freeze.",

@@ -41,13 +41,22 @@ export function parseReveal(reveal: string): { expression: string; reading: stri
   return { expression: m[1]!, reading: m[2]!, meaning: m[3]!, extra: rest.map((s) => s.trim()).join("\n") };
 }
 
-export function revealBlock(reveal: string): HTMLElement {
+export interface RevealExtras {
+  romaji(reading: string): string | null;
+  cantonese(expression: string, reading: string): string | null;
+}
+
+export function revealBlock(reveal: string, extras?: RevealExtras): HTMLElement {
   const p = parseReveal(reveal);
   if (!p) return h("div", { class: "reveal" }, h("p", { class: "pre" }, reveal));
+  const romaji = extras?.romaji(p.reading) ?? null;
+  const yue = extras?.cantonese(p.expression, p.reading) ?? null;
   return h("div", { class: "reveal" },
     h("div", { class: "reveal-word", lang: "ja" },
       h("span", { class: "jp-lg" }, p.expression),
       p.reading !== p.expression ? h("span", { class: "jp-reading" }, `【${p.reading}】`) : null),
+    romaji ? h("p", { class: "reveal-romaji", lang: "ja-Latn" }, romaji) : null,
     h("p", { class: "reveal-meaning" }, p.meaning),
+    yue ? h("p", { class: "reveal-yue", lang: "zh-HK" }, yue) : null,
     p.extra ? h("p", { class: "pre jp", lang: "ja" }, p.extra) : null);
 }

@@ -1,6 +1,6 @@
 /**
  * Drives the installed debug APK on an Android emulator and checks the voice
- * buttons do something. Run by .github/workflows/android-emulator.yml.
+ * buttons do something, and that a revealed word shows romaji and Cantonese. Run by .github/workflows/android-emulator.yml.
  *
  * A browser test cannot catch this class of bug: on a real phone the
  * "Install Japanese voice data" button did nothing, because the native call
@@ -83,6 +83,18 @@ async function expectLeavesApp(device, page, button, name, shot) {
   let page = await openApp(device);
   fs.writeFileSync(`${OUT}/01-study.png`, await device.screenshot());
 
+  // A fresh install opens on a teach-first card: its reveal must carry the
+  // romaji reading and the Hong Kong Cantonese meaning (both on by default),
+  // drawn in the real WebView with the phone's own CJK fonts.
+  const reveal = page.locator(".reveal").first();
+  await reveal.waitFor({ timeout: 20_000 });
+  const romaji = (await reveal.locator(".reveal-romaji").innerText({ timeout: 5_000 })).trim();
+  const yue = (await reveal.locator(".reveal-yue").innerText({ timeout: 5_000 })).trim();
+  log(`reveal: ${(await reveal.innerText()).replace(/\s+/g, " ")}`);
+  if (!/^[a-z' ~;-]+$/.test(romaji)) throw new Error(`romaji line looks wrong: "${romaji}"`);
+  if (!/[\u4e00-\u9fff]/.test(yue)) throw new Error(`Cantonese line has no Chinese: "${yue}"`);
+  fs.writeFileSync(`${OUT}/01b-reveal-romaji-cantonese.png`, await device.screenshot());
+
   // Settings: the diagnosis line comes from the native status() call, so a
   // non-empty engine list here also proves the <queries> visibility fix.
   await page.getByRole("button", { name: /Settings/ }).click();
@@ -91,6 +103,8 @@ async function expectLeavesApp(device, page, button, name, shot) {
   await sleep(1500);
   log(`settings voice field: ${(await voiceField.innerText()).replace(/\s+/g, " ")}`);
   fs.writeFileSync(`${OUT}/02-settings.png`, await device.screenshot());
+  const details = page.locator("section.card", { hasText: "Romaji" });
+  log(`settings word details: ${(await details.innerText({ timeout: 5_000 })).replace(/\s+/g, " ")}`);
 
   await expectLeavesApp(device, page, voiceField.getByRole("button", { name: "Open voice settings" }),
     "Open voice settings", "03-voice-settings-opened");

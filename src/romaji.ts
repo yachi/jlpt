@@ -121,6 +121,7 @@ for (const [row, vowel] of [
  *   katakana -> hiragana        コーヒー and こーひー compare equal
  *   ー        -> repeated vowel  コーヒー -> こおひい, matching "koohii"
  *   long o/e  -> one spelling    がっこう and がっこお both -> がっこお
+ *   づ/ぢ     -> ず/じ           つづく matches "tsuzuku"
  *
  * The long-vowel rule is positional, not literal: う lengthens whatever お-row
  * mora precedes it, so it is こ+う in がっこう that has to fold, and a literal
@@ -154,7 +155,11 @@ export function foldKana(input: string): string {
   }
 
   let out = "";
-  for (const ch of expanded) {
+  for (let ch of expanded) {
+    // づ/ぢ sound exactly like ず/じ in modern Japanese, and Hepburn writes
+    // them the same (つづく is tsuzuku), so a typed "zu" must match either.
+    if (ch === "づ") ch = "ず";
+    else if (ch === "ぢ") ch = "じ";
     const prevVowel = out.length > 0 ? VOWEL_OF[out[out.length - 1]!] : undefined;
     if (ch === "う" && prevVowel === "お") out += "お";
     else if (ch === "い" && prevVowel === "え") out += "え";
@@ -166,4 +171,95 @@ export function foldKana(input: string): string {
 /** Normalised form used to compare a typed production answer with the key. */
 export function readingKey(input: string): string {
   return foldKana(romajiToKana(input));
+}
+
+/**
+ * Kana -> romaji, for showing a reading in Latin letters.
+ *
+ * Hepburn consonants (shi, chi, tsu, fu, ji) with long vowels spelled the way
+ * the kana are, not with macrons: とうきょう -> toukyou, コーヒー -> koohii.
+ * That is exactly what the production card's input box accepts, so what the
+ * learner reads is what they can type back. Macrons would also need a guess
+ * at morpheme boundaries (思う is omou, not omō) that kana alone can't settle.
+ *
+ * Anything that is not kana (～, ;, spaces, kanji) passes through.
+ */
+const MORA: Record<string, string> = {
+  あ: "a", い: "i", う: "u", え: "e", お: "o",
+  か: "ka", き: "ki", く: "ku", け: "ke", こ: "ko",
+  が: "ga", ぎ: "gi", ぐ: "gu", げ: "ge", ご: "go",
+  さ: "sa", し: "shi", す: "su", せ: "se", そ: "so",
+  ざ: "za", じ: "ji", ず: "zu", ぜ: "ze", ぞ: "zo",
+  た: "ta", ち: "chi", つ: "tsu", て: "te", と: "to",
+  だ: "da", ぢ: "ji", づ: "zu", で: "de", ど: "do",
+  な: "na", に: "ni", ぬ: "nu", ね: "ne", の: "no",
+  は: "ha", ひ: "hi", ふ: "fu", へ: "he", ほ: "ho",
+  ば: "ba", び: "bi", ぶ: "bu", べ: "be", ぼ: "bo",
+  ぱ: "pa", ぴ: "pi", ぷ: "pu", ぺ: "pe", ぽ: "po",
+  ま: "ma", み: "mi", む: "mu", め: "me", も: "mo",
+  や: "ya", ゆ: "yu", よ: "yo",
+  ら: "ra", り: "ri", る: "ru", れ: "re", ろ: "ro",
+  わ: "wa", ゐ: "i", ゑ: "e", を: "o", ん: "n", ゔ: "vu",
+  ぁ: "a", ぃ: "i", ぅ: "u", ぇ: "e", ぉ: "o", ゃ: "ya", ゅ: "yu", ょ: "yo", ゎ: "wa",
+};
+
+/** Two-kana sounds: a mora plus a small kana that changes it. */
+const DIGRAPH: Record<string, string> = {
+  しゃ: "sha", しゅ: "shu", しょ: "sho", しぇ: "she",
+  ちゃ: "cha", ちゅ: "chu", ちょ: "cho", ちぇ: "che",
+  じゃ: "ja", じゅ: "ju", じょ: "jo", じぇ: "je",
+  ぢゃ: "ja", ぢゅ: "ju", ぢょ: "jo",
+  ふぁ: "fa", ふぃ: "fi", ふぇ: "fe", ふぉ: "fo", ふゅ: "fyu",
+  ゔぁ: "va", ゔぃ: "vi", ゔぇ: "ve", ゔぉ: "vo",
+  てぃ: "ti", でぃ: "di", とぅ: "tu", どぅ: "du",
+  うぃ: "wi", うぇ: "we", うぉ: "wo",
+  つぁ: "tsa", つぃ: "tsi", つぇ: "tse", つぉ: "tso",
+};
+const SMALL_Y: Record<string, string> = { ゃ: "a", ゅ: "u", ょ: "o" };
+
+function toHiragana(input: string): string {
+  let s = "";
+  for (const ch of input) {
+    const code = ch.codePointAt(0)!;
+    s += code >= KATAKANA_START && code <= KATAKANA_END ? String.fromCodePoint(code - KANA_OFFSET) : ch;
+  }
+  return s;
+}
+
+export function kanaToRomaji(input: string): string {
+  const s = toHiragana(input);
+  const out: string[] = [];
+  let geminate = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    const n = s[i + 1];
+    let r: string | undefined;
+    if (n !== undefined && DIGRAPH[c + n] !== undefined) { r = DIGRAPH[c + n]; i++; }
+    else if (n !== undefined && SMALL_Y[n] !== undefined && MORA[c]?.endsWith("i") && c !== "い") {
+      // きゃ -> kya: drop the i, add y + vowel
+      r = MORA[c]!.slice(0, -1) + "y" + SMALL_Y[n]; i++;
+    } else if (c === "っ") { geminate = true; continue; }
+    else if (c === "ー" || c === "ｰ") {
+      const prev = out.join("").match(/[aiueo]$/)?.[0];
+      if (prev) out.push(prev);
+      continue;
+    } else if (c === "～" || c === "〜") r = "~";
+    else r = MORA[c];
+
+    if (r === undefined) { if (geminate) out.push("'"); geminate = false; out.push(c); continue; }
+    if (c === "ん") {
+      // ん before a vowel or y reads apart: きんようび is kin'youbi.
+      const nx = s[i + 1];
+      const next = nx !== undefined ? (MORA[nx] ?? "") : "";
+      r = /^[aiueoy]/.test(next) ? "n'" : "n";
+    }
+    if (geminate) {
+      // っ doubles the next consonant; before ch it is written t (matcha).
+      out.push(r.startsWith("ch") ? "t" : /^[aiueo]/.test(r) ? "" : r[0]!);
+      geminate = false;
+    }
+    out.push(r);
+  }
+  if (geminate) out.push("'");
+  return out.join("");
 }
