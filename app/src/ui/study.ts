@@ -10,6 +10,7 @@ import { grade, hasAudioStimulus, introduceCard, humanInterval, DONT_KNOW,
   type Question, type GradeResult } from "../../../src/quiz";
 import { romajiToKana } from "../../../src/romaji";
 import { h, mount, revealBlock } from "./dom";
+import { revealExtras } from "./extras";
 import { getSetting, setSetting } from "../../../src/schema";
 import { getLevel, getMode, MODE_LABEL, type Ctx } from "./context";
 import { pickQuestion, nothingDue } from "./pick";
@@ -266,7 +267,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       h("section", { class: "card" },
         badge(q),
         h("p", { class: "instruction" }, "New word: study it. It will be tested in about ten minutes."),
-        revealBlock(q.reveal)),
+        revealBlock(q.reveal, revealExtras(ctx.db))),
       h("div", { class: "actions sticky" }, play, got));
     focusIfPointer(got);
     if (q.audioText) void say(q.audioText);
@@ -390,7 +391,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
         : h("p", { class: "verdict bad" }, response === DONT_KNOW ? "Not yet: " : "Wrong: ",
             h("span", { lang: "ja", class: "jp" }, r.answer));
       mount(feedback, h("div", { class: `result ${r.correct ? "ok" : "bad"}` },
-        verdict, revealBlock(r.reveal),
+        verdict, revealBlock(r.reveal, revealExtras(ctx.db)),
         h("p", { class: "muted" }, `Next review in ${r.intervalHuman}`)));
       enter(feedback.firstElementChild);
       // The verdict lands below the choices, often under the fold on a phone.
@@ -418,7 +419,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
               "so this card was not graded. Answering it now would grade a guess."),
             h("button", { class: "link", type: "button", onclick: () => ctx.openVoiceSettings() },
               "Install Japanese voice data")),
-          revealBlock(q.reveal)),
+          revealBlock(q.reveal, revealExtras(ctx.db))),
         h("div", { class: "actions sticky" },
           h("button", { class: "btn primary big", type: "button", onclick: next }, "Continue without listening")));
     }
