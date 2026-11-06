@@ -9,6 +9,7 @@
 import { grade, hasAudioStimulus, introduceCard, humanInterval, DONT_KNOW,
   type Question, type GradeResult } from "../../../src/quiz";
 import { romajiToKana } from "../../../src/romaji";
+import { hintPolicy } from "../../../src/mnemonics";
 import { h, mount, revealBlock } from "./dom";
 import { revealExtras } from "./extras";
 import { getSetting, setSetting } from "../../../src/schema";
@@ -267,7 +268,7 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
       h("section", { class: "card" },
         badge(q),
         h("p", { class: "instruction" }, "New word: study it. It will be tested in about ten minutes."),
-        revealBlock(q.reveal, revealExtras(ctx.db))),
+        revealBlock(q.reveal, revealExtras(ctx.db), hintPolicy("teach"))),
       h("div", { class: "actions sticky" }, play, got));
     focusIfPointer(got);
     if (q.audioText) void say(q.audioText);
@@ -390,8 +391,11 @@ export function studyScreen(ctx: Ctx, root: HTMLElement): () => void {
         ? h("p", { class: "verdict ok" }, r.rating === 2 ? "Correct, but slow: rated Hard" : "Correct")
         : h("p", { class: "verdict bad" }, response === DONT_KNOW ? "Not yet: " : "Wrong: ",
             h("span", { lang: "ja", class: "jp" }, r.answer));
+      // The hint unfolds after a miss on a card still being learned; a mature
+      // card's miss, and every correct answer, keep it one tap away.
+      const hint = hintPolicy(r.correct ? "right" : "wrong", r.stabilityBefore);
       mount(feedback, h("div", { class: `result ${r.correct ? "ok" : "bad"}` },
-        verdict, revealBlock(r.reveal, revealExtras(ctx.db)),
+        verdict, revealBlock(r.reveal, revealExtras(ctx.db), hint),
         h("p", { class: "muted" }, `Next review in ${r.intervalHuman}`)));
       enter(feedback.firstElementChild);
       // The verdict lands below the choices, often under the fold on a phone.

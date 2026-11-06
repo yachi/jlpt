@@ -2,6 +2,8 @@
  * The one DOM helper the screens share. No framework: the app is four screens
  * of buttons and text, and a framework would be most of the bundle.
  */
+import { hintRuns, type HintPolicy, type Mnemonic } from "../../../src/mnemonics";
+
 type Attr = string | number | boolean | null | undefined | ((ev: Event) => void);
 type Child = Node | string | number | null | undefined | false;
 
@@ -44,13 +46,29 @@ export function parseReveal(reveal: string): { expression: string; reading: stri
 export interface RevealExtras {
   romaji(reading: string): string | null;
   cantonese(expression: string, reading: string): string | null;
+  /** The memory hint, or null when there is none or hints are off. */
+  mnemonic?(expression: string, reading: string): Mnemonic | null;
 }
 
-export function revealBlock(reveal: string, extras?: RevealExtras): HTMLElement {
+/**
+ * The memory hint under a revealed word. `policy` is hintPolicy()'s answer for
+ * this moment: open on the teach card and after a young miss, one tap away
+ * otherwise. A <details> keeps "one tap away" native, and remembers nothing.
+ */
+export function hintBlock(m: Mnemonic, policy: HintPolicy): HTMLElement | null {
+  if (policy === "hidden") return null;
+  const body = h("p", { class: "hint-text", lang: "zh-HK" },
+    hintRuns(m.hint).map((r) => r.keyword ? h("strong", { class: "hint-key" }, r.text) : r.text));
+  return h("details", { class: "hint", open: policy === "open" },
+    h("summary", null, "記法 Memory hint"), body);
+}
+
+export function revealBlock(reveal: string, extras?: RevealExtras, hint: HintPolicy = "hidden"): HTMLElement {
   const p = parseReveal(reveal);
   if (!p) return h("div", { class: "reveal" }, h("p", { class: "pre" }, reveal));
   const romaji = extras?.romaji(p.reading) ?? null;
   const yue = extras?.cantonese(p.expression, p.reading) ?? null;
+  const m = hint === "hidden" ? null : extras?.mnemonic?.(p.expression, p.reading) ?? null;
   return h("div", { class: "reveal" },
     h("div", { class: "reveal-word", lang: "ja" },
       h("span", { class: "jp-lg" }, p.expression),
@@ -58,5 +76,6 @@ export function revealBlock(reveal: string, extras?: RevealExtras): HTMLElement 
     romaji ? h("p", { class: "reveal-romaji", lang: "ja-Latn" }, romaji) : null,
     h("p", { class: "reveal-meaning" }, p.meaning),
     yue ? h("p", { class: "reveal-yue", lang: "zh-HK" }, yue) : null,
+    m ? hintBlock(m, hint) : null,
     p.extra ? h("p", { class: "pre jp", lang: "ja" }, p.extra) : null);
 }

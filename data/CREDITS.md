@@ -25,3 +25,21 @@ this project with Claude (AI) from each word's Japanese sense and English gloss.
 Traditional characters, colloquial HK usage. Display-only: not seeded into
 study.db, so a correction here never touches progress. Keyed by the CSVs' own
 expression + reading; `bun test src/cantonese.test.ts` fails if a word is missing.
+
+## mnemonics.tsv
+
+Memory hints for every word in n5.csv: a Cantonese sound-alike inside a short
+scene (keyword method), or the kanji's own Cantonese reading when it already
+matches the Japanese on'yomi. Written for this project with Claude (AI). Every
+sound-alike was checked against Jyutping with `tools/mnemonic-candidates.ts`,
+and its Jyutping is stored in the last column so a reader can check it too.
+Display-only, like cantonese.tsv. `bun test src/mnemonics.test.ts` fails if an
+N5 word is missing or a hint is malformed.
+
+The tool reads two dictionaries, cached under `.cache/` and not shipped:
+
+- [rime-cantonese](https://github.com/rime/rime-cantonese) (CanCLID), the
+  Jyutping character and word lists, under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [OpenCC](https://github.com/BYVoid/OpenCC)'s `JPShinjitaiCharacters.txt`,
+  the Japanese 新字体 to traditional table, under Apache-2.0.

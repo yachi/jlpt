@@ -8,6 +8,8 @@
  */
 import { openDb, getSetting, setSetting, MODES, type Mode } from "./db";
 import { seed } from "./bank";
+import { readDataFile } from "./data-files";
+import { parseMnemonics, mnemonicForReveal, plainHint, hintPolicy, type MnemonicIndex } from "./mnemonics";
 import {
   nextQuestion, grade, dueCount, humanInterval, scheduler,
   introducedByMode, parseModeWeights, modePriority, hasAudioStimulus, DONT_KNOW,
@@ -37,6 +39,15 @@ const C = {
   cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
 };
+
+/** data/mnemonics.tsv, read once. Display only: a missing file just means no hints. */
+let mnemonics: MnemonicIndex | null = null;
+async function hintLine(reveal: string, moment: "teach" | "wrong" | "right", stabilityDays: number | null = null): Promise<string | null> {
+  mnemonics ??= parseMnemonics((await readDataFile("mnemonics.tsv")) ?? "");
+  const m = mnemonicForReveal(mnemonics, reveal);
+  if (!m || hintPolicy(moment, stabilityDays) !== "open") return null;
+  return `  ${C.dim("記法 ")}${plainHint(m.hint)}`;
+}
 
 function levelOpt(): "N5" | "N4" | "both" {
   const l = (opt("level", "both") ?? "both").toLowerCase();
@@ -144,10 +155,12 @@ async function cmdNext() {
       const audio = q.audioText
         ? await synthesize(q.audioText, { rate: "-10%", ...voices })
         : null;
+      mnemonics ??= parseMnemonics((await readDataFile("mnemonics.tsv")) ?? "");
       console.log(JSON.stringify({
         teach: {
           itemId: q.itemId, mode: q.mode, level: q.level,
           expression: q.prompt || q.audioText, reveal: q.reveal,
+          hint: mnemonicForReveal(mnemonics, q.reveal)?.hint,
           audioPath: audio?.path, audioVoice: audio?.voice,
           instruction: "New word — study it, then run: cli seen",
         },
@@ -171,7 +184,9 @@ async function cmdNext() {
   }
   if (q.teachFirst) {
     console.log(C.bold(`\n  NEW — ${q.level} · ${q.mode}`));
-    console.log(`  ${q.reveal}\n`);
+    console.log(`  ${q.reveal}`);
+    const hint = await hintLine(q.reveal, "teach");
+    console.log(hint ? `${hint}\n` : "");
     if (q.audioText) await speak(q.audioText, { rate: "-10%", ...voices });
     const { due } = introduceCard(db, q.itemId, q.mode);
     setSetting(db, "pending", "");
@@ -224,6 +239,9 @@ async function cmdAnswer() {
   if (JSON_OUT) { console.log(JSON.stringify({ ...r, ...dueCount(db) })); return; }
   console.log(r.correct ? C.green("  ✓ correct") : C.red(`  ✗ wrong — answer: ${r.answer}`));
   console.log(`  ${C.dim(r.reveal)}`);
+  // After a miss, the hint; not once the card was mature (see hintPolicy).
+  const hint = await hintLine(r.reveal, r.correct ? "right" : "wrong", r.stabilityBefore);
+  if (hint) console.log(hint);
   console.log(`  ${C.dim(`next in ${r.intervalHuman} · stability ${r.stability?.toFixed(1)}d · rating ${r.rating}`)}\n`);
 }
 
@@ -267,7 +285,9 @@ async function cmdStudy() {
     const r = grade(db, q, idx, Date.now() - t0);
     asked++; if (r.correct) right++;
     console.log(r.correct ? C.green("  ✓ correct") : C.red(`  ✗ wrong — ${r.answer}`));
-    console.log(`  ${C.dim(r.reveal)}   ${C.dim(`next: ${r.intervalHuman}`)}\n`);
+    console.log(`  ${C.dim(r.reveal)}   ${C.dim(`next: ${r.intervalHuman}`)}`);
+    const hint = await hintLine(r.reveal, r.correct ? "right" : "wrong", r.stabilityBefore);
+    console.log(hint ? `${hint}\n` : "");
     if (!r.correct && q.audioText) await speak(q.audioText, { rate: "-20%", ...voices });
   }
   printSummary(asked, right);
