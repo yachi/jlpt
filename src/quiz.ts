@@ -499,6 +499,8 @@ export function ratingFor(
 export interface GradeResult {
   correct: boolean; rating: Rating; answer: string; reveal: string;
   nextDue: number; intervalHuman: string; stability: number | null; retrievability: number;
+  /** Stability (days) going INTO this review: how well-known the card was before the answer. */
+  stabilityBefore: number | null;
 }
 
 export function grade(
@@ -559,6 +561,7 @@ export function grade(
     correct, rating, answer: q.answer, reveal: q.reveal,
     nextDue: after.due, intervalHuman: humanInterval(after.due - now),
     stability: after.stability, retrievability: scheduler.retrievability(after, now),
+    stabilityBefore: before.stability,
   };
 }
 

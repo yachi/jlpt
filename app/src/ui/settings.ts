@@ -7,7 +7,7 @@
 import { getSetting, setSetting, MODES, type Mode } from "../../../src/schema";
 import { parseModeWeights } from "../../../src/quiz";
 import { APP_HAPTICS_KEY, APP_SOUND_KEY, APP_STREAK_KEY } from "./fx";
-import { APP_CANTONESE_KEY, APP_ROMAJI_KEY } from "./extras";
+import { APP_CANTONESE_KEY, APP_MNEMONIC_KEY, APP_ROMAJI_KEY } from "./extras";
 import { h, mount } from "./dom";
 import { deliverBackup } from "../platform/share-backup";
 import { getLevel, getMode, setFilter, MODE_LABEL, type Ctx, type Level } from "./context";
@@ -148,7 +148,9 @@ export function settingsScreen(ctx: Ctx, root: HTMLElement): () => void {
         toggle("Romaji", "The reading in Roman letters, e.g. たべる → taberu. Spelled the way the answer box accepts it.",
           APP_ROMAJI_KEY, "1"),
         toggle("廣東話 Cantonese", "The meaning in Hong Kong Cantonese, under the English, e.g. 食 for 食べる.",
-          APP_CANTONESE_KEY, "1")),
+          APP_CANTONESE_KEY, "1"),
+        toggle("記法 Memory hint", "A Cantonese sound-alike in a short scene, or the kanji's Cantonese reading. Shown when a word is taught and after a miss; one tap away otherwise.",
+          APP_MNEMONIC_KEY, "1")),
       h("h2", null, "Feedback"),
       h("section", { class: "card" },
         toggle("Show streak", "Days in a row you studied. A missed day is covered by a streak freeze.",

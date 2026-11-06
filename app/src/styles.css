@@ -231,6 +231,13 @@ h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; color: var(--muted); font-weight: 
 .reveal-word { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; }
 .reveal-meaning { font-size: 1.1rem; margin: .25rem 0 0; overflow-wrap: anywhere; }
 .reveal-romaji { font-size: 1rem; color: var(--muted); margin: .1rem 0 0; letter-spacing: .02em; }
+.hint { margin: .5rem 0 0; border-left: 3px solid var(--accent); padding-left: .6rem; }
+.hint > summary { cursor: pointer; font-size: .85rem; color: var(--muted); list-style: none; user-select: none; }
+.hint > summary::-webkit-details-marker { display: none; }
+.hint > summary::before { content: "▸ "; }
+.hint[open] > summary::before { content: "▾ "; }
+.hint-text { font-family: "Noto Sans HK", "Noto Sans CJK HK", "Noto Sans TC", sans-serif; font-size: 1.05rem; margin: .25rem 0 0; overflow-wrap: anywhere; line-height: 1.45; }
+.hint-key { font-weight: 700; color: var(--accent); }
 .reveal-yue { font-family: "Noto Sans HK", "Noto Sans CJK HK", "Noto Sans TC", sans-serif; font-size: 1.1rem; margin: .15rem 0 0; overflow-wrap: anywhere; }
 
 .actions { display: flex; gap: .6rem; flex-wrap: wrap; }
